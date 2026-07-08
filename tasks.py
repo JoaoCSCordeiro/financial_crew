@@ -11,19 +11,38 @@ nao e apenas documentacao, e parte do prompt que o LLM recebe, e ajuda a
 reduzir divergencia de formato entre execucoes.
 """
 
+import time
+
 from crewai import Agent, Task
+
+from schemas import RelatorioFinanceiro
+
+# Pausa entre tarefas do MESMO ativo, para respeitar o rate limit gratuito
+# da Groq (8000 tokens/minuto no modelo openai/gpt-oss-120b). Uma analise
+# completa faz 4 chamadas ao LLM (noticias, tecnico, orquestrador + a
+# chamada extra do 'instructor' para validar o schema) muito seguidas --
+# isso sozinho pode esgotar o limite antes mesmo de passarmos para o
+# proximo ativo. Espacar as tarefas dentro do mesmo ativo da tempo ao
+# limite (janela rolante por minuto) para libertar capacidade.
+SECONDS_BETWEEN_TASKS = 25
+
+
+def _pause_after_task(task_output) -> None:
+    """Callback executado apos cada tarefa, para espacar chamadas ao LLM."""
+    time.sleep(SECONDS_BETWEEN_TASKS)
 
 
 def build_news_task(agent: Agent) -> Task:
     """Tarefa do Agente 1: recolher e resumir noticias recentes do ativo."""
     return Task(
         description=(
-            "Usa a ferramenta 'obter_noticias_recentes' para pesquisar noticias "
-            "sobre '{asset_name}'. Analisa os titulos e excertos devolvidos e "
-            "produz um resumo do sentimento geral do mercado (positivo, negativo, "
-            "neutro ou misto), citando quais titulos concretos suportam essa "
-            "conclusao. Se a ferramenta devolver um erro ou zero noticias, "
-            "reporta isso explicitamente em vez de inventar contexto."
+            "Usa a ferramenta 'obter_noticias_recentes' com max_results=5 para "
+            "pesquisar noticias sobre '{asset_name}'. Analisa os titulos e "
+            "excertos devolvidos e produz um resumo do sentimento geral do "
+            "mercado (positivo, negativo, neutro ou misto), citando quais "
+            "titulos concretos suportam essa conclusao. Se a ferramenta "
+            "devolver um erro ou zero noticias, reporta isso explicitamente "
+            "em vez de inventar contexto."
         ),
         expected_output=(
             "Um resumo estruturado em texto contendo: (1) o sentimento geral "
@@ -33,6 +52,7 @@ def build_news_task(agent: Agent) -> Task:
             "falhou ou nao devolveu resultados."
         ),
         agent=agent,
+        callback=_pause_after_task,
     )
 
 
@@ -55,6 +75,7 @@ def build_technical_task(agent: Agent) -> Task:
             "explicito indicando se a obtencao de dados falhou."
         ),
         agent=agent,
+        callback=_pause_after_task,
     )
 
 
@@ -103,4 +124,5 @@ def build_validation_task(agent: Agent, context_tasks: list[Task]) -> Task:
         ),
         agent=agent,
         context=context_tasks,
+        output_pydantic=RelatorioFinanceiro,
     )

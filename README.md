@@ -13,7 +13,7 @@ enforce factual grounding and prevent hallucinated data.
 | 2     | LLM configuration (Groq)                  | Done      |
 | 3     | Agent definitions                         | Done      |
 | 4     | Task and Crew assembly                    | Done      |
-| 5     | Production output (strict schema)         | Pending   |
+| 5     | Production output (strict schema)         | Done      |
 
 ## Architecture
 
@@ -38,11 +38,13 @@ and formats.
 ```
 financial_crew/
 ├── requirements.txt
-├── .env.example
+├── .gitignore
 ├── llm_config.py          # LLM configuration and connectivity test (Groq)
 ├── agents.py               # Agent definitions (News Analyst, Technical Analyst, Orchestrator)
 ├── tasks.py                 # Task definitions bound to each agent
 ├── crew.py                  # Crew assembly and execution entrypoint
+├── schemas.py                # Pydantic schema enforced on the final report
+├── main.py                    # Production entrypoint (CLI, batch execution, error isolation)
 └── tools/
     ├── __init__.py
     ├── exceptions.py         # Custom exception hierarchy
@@ -93,13 +95,7 @@ it.
 
 ### 3. Configure the Groq API key
 
-Copy the template and fill in your real key:
-
-```bash
-cp .env.example .env       # Windows: copy .env.example .env
-```
-
-Edit `.env`:
+Create a file named `.env` in the project root with:
 
 ```
 GROQ_API_KEY=your_real_key_here
@@ -199,8 +195,64 @@ applied automatically at import time — no action needed on your part. Once
 crewAI ships an official fix, this patch (clearly marked with a `TODO` in
 `llm_config.py`) can be removed.
 
+### Block 5 — Strict schema and production entrypoint
+
+`schemas.py` defines the exact Pydantic structure (`RelatorioFinanceiro`)
+the Orchestrator's output must satisfy. It is attached to the validation
+task via `output_pydantic`, so CrewAI validates the LLM's JSON against the
+schema automatically, instead of relying on the LLM to "just write valid
+JSON".
+
+`main.py` wraps everything in a batch-friendly, fault-isolated entrypoint:
+each asset is analyzed independently (one failure does not abort the
+others), validated reports are saved to `output/<TICKER>_<timestamp>.json`,
+and a summary with per-asset status is printed at the end.
+
+Run the default set of assets (Apple, Tesla, Bitcoin, Ethereum, Microsoft):
+
+```bash
+python main.py
+```
+
+Run specific assets only:
+
+```bash
+python main.py --ticker Tesla:TSLA --ticker Bitcoin:BTC-USD
+```
+
+Expected output: a per-asset status line (`SUCCESS`, `LLM_ERROR`,
+`TOOL_ERROR`, `INVALID_SCHEMA`, or `UNEXPECTED_ERROR`), a summary count,
+and a process exit code of `0` if all assets succeeded or `1` otherwise
+(useful for CI/scripting). Successful reports are written as JSON files
+under `output/`.
+
+### Groq free tier rate limits
+
+The `openai/gpt-oss-120b` model is capped at 8000 tokens per minute on
+Groq's free tier. A single full analysis makes 4 LLM calls in quick
+succession (news task, technical task, orchestrator task, plus one extra
+call from `instructor` to enforce the Pydantic schema) -- this alone can
+saturate the per-minute budget before the run even finishes, regardless
+of any delay *between* assets.
+
+The fix is a deliberate pause *within* each analysis: `tasks.py` attaches
+a callback to the news and technical tasks that sleeps for
+`SECONDS_BETWEEN_TASKS` (25s by default) after each one completes. This
+spreads the 4 LLM calls of a single asset across a wider time window, so
+the rolling per-minute limit has room to recover between calls.
+`main.py` additionally waits `SECONDS_BETWEEN_ASSETS` (30s) between
+assets in a batch run, and `crew.py` retries with exponential backoff as
+a last-resort safety net if a rate limit is still hit.
+
+As a result, a full run of all 5 default assets takes several minutes
+(each asset's own pauses plus the inter-asset wait). If you still see
+`RATE_LIMIT_ERROR` in the summary, increase `SECONDS_BETWEEN_TASKS` in
+`tasks.py` and/or `SECONDS_BETWEEN_ASSETS` in `main.py`, or check your
+usage at https://console.groq.com/settings/billing.
+
 ## Roadmap
 
-Block 5 will enforce a strict Pydantic schema on the Orchestrator's final
-output, wrap execution in a robust `main` entrypoint, and make the result
-easily consumable by a frontend or database.
+All five planned blocks are complete. Possible next steps beyond the
+original scope: a lightweight API wrapper (FastAPI) around `main.py`,
+persistence to a database instead of flat JSON files, and a scheduled/cron
+execution mode for periodic reports.
