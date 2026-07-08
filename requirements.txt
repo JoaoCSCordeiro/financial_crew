@@ -1,0 +1,20 @@
+# --- Orquestração de Agentes ---
+crewai>=1.15.0,<2.0.0
+crewai-tools>=0.50.0
+
+# --- LLM Engine (Custo Zero) ---
+# crewai.LLM (baseado em litellm) trata da ligação a Groq e Ollama nativamente.
+# Não fixamos versão exata -- deixamos o pip resolver a versão compatível
+# com a versão do crewai instalada, para evitar conflitos de dependências.
+litellm
+
+# --- Ferramentas de Dados ---
+yfinance>=1.5.0
+ddgs>=9.0.0  # sucessor oficial do pacote descontinuado 'duckduckgo-search'
+
+# --- Validação / Schema ---
+pydantic>=2.11.9,<2.13  # limite superior por compatibilidade com crewai-core
+
+# --- Utilitários ---
+python-dotenv>=1.0.1
+tenacity>=9.0.0
