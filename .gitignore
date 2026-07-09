@@ -35,3 +35,6 @@ desktop.ini
 # CrewAI local artifacts
 .crewai/
 crew_tasks_output.json
+
+# Relatorios gerados (main.py)
+output/

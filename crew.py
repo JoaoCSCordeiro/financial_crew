@@ -8,9 +8,12 @@ outputs dos outros dois como contexto (ver `context=context_tasks` em
 `build_validation_task`).
 """
 
+import json
 import logging
+import re
 
 from crewai import Crew, Process
+from pydantic import ValidationError
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from agents import (
@@ -18,6 +21,7 @@ from agents import (
     build_orchestrator_agent,
     build_technical_analyst_agent,
 )
+from schemas import RelatorioFinanceiro
 from tasks import build_news_task, build_technical_task, build_validation_task
 
 logger = logging.getLogger(__name__)
@@ -46,9 +50,47 @@ def is_rate_limit_error(exc: BaseException) -> bool:
     return False
 
 
-def build_crew() -> Crew:
+def _extract_json_report(raw_text: str) -> RelatorioFinanceiro | None:
+    """
+    Extrai e valida o RelatorioFinanceiro a partir do texto em bruto devolvido
+    pelo Orquestrador.
+
+    Fazemos isto manualmente (em vez de usar `output_pydantic`, que forca o
+    CrewAI a exigir uma tool-call estruturada) porque forcar tool-calling em
+    modelos Groq como o gpt-oss-120b e instavel: o modelo por vezes devolve o
+    JSON correto como texto simples em vez de uma chamada de tool formal, e a
+    API da Groq rejeita isso com um erro 400 ("Tool choice is required, but
+    model did not call a tool") mesmo quando o conteudo gerado esta correto e
+    visivel no campo `failed_generation` do erro. Validar o JSON manualmente
+    aqui evita esse problema por completo, e ainda poupa uma chamada extra ao
+    LLM (a que o `instructor` faria para forcar o schema).
+
+    Returns:
+        A instancia validada, ou None se o texto nao contiver JSON valido
+        que respeite o schema.
+    """
+    match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+    if not match:
+        return None
+
+    try:
+        data = json.loads(match.group(0))
+        return RelatorioFinanceiro.model_validate(data)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        logger.warning("Falha ao fazer parse/validar o JSON do Orquestrador: %s", exc)
+        return None
+
+
+def build_crew(stage_callback=None) -> Crew:
     """
     Constroi a Crew completa: 3 agentes + 3 tarefas em processo sequencial.
+
+    Args:
+        stage_callback: funcao opcional `(stage: str) -> None` chamada
+            sempre que a analise avanca para uma nova fase do pipeline
+            ("tecnico" quando a tarefa de noticias termina, "orquestrador"
+            quando a tarefa tecnica termina). Usado pelo frontend para
+            mostrar progresso real em vez de um spinner generico.
 
     Returns:
         Instancia de `crewai.Crew` pronta a ser executada com `.kickoff(inputs=...)`.
@@ -57,8 +99,8 @@ def build_crew() -> Crew:
     technical_agent = build_technical_analyst_agent()
     orchestrator_agent = build_orchestrator_agent()
 
-    news_task = build_news_task(news_agent)
-    technical_task = build_technical_task(technical_agent)
+    news_task = build_news_task(news_agent, on_stage_change=stage_callback)
+    technical_task = build_technical_task(technical_agent, on_stage_change=stage_callback)
     validation_task = build_validation_task(
         orchestrator_agent, context_tasks=[news_task, technical_task]
     )
@@ -80,52 +122,60 @@ def build_crew() -> Crew:
 def _kickoff_with_retry(crew: Crew, inputs: dict):
     """
     Wrapper com retry para o rate limit gratuito da Groq (8000 tokens/minuto
-    no tier 'on_demand'). Um unico kickoff desta Crew pode facilmente
-    consumir varios milhares de tokens (3 chamadas ao LLM + a chamada extra
-    do 'instructor' para validar o output_pydantic), por isso e normal
-    esbarrar no limite ao correr varios ativos seguidos. Esperamos com
-    backoff exponencial (15s, 30s, 60s, 90s) em vez de falhar imediatamente.
+    no tier 'on_demand'). Esperamos com backoff exponencial (15s, 30s, 60s,
+    90s) em vez de falhar imediatamente -- necessario mesmo com as pausas
+    intra-execucao em tasks.py, como rede de seguranca adicional.
     """
     return crew.kickoff(inputs=inputs)
 
 
-def run_analysis(asset_name: str, ticker: str):
+def run_analysis(asset_name: str, ticker: str, stage_callback=None):
     """
     Executa a analise completa para um ativo especifico.
 
     Args:
         asset_name: nome do ativo em linguagem natural (ex: "Tesla").
         ticker: simbolo do ativo (ex: "TSLA").
+        stage_callback: funcao opcional `(stage: str) -> None` chamada em
+            cada transicao de fase do pipeline: "noticias" (inicio),
+            "tecnico", "orquestrador", "concluido". Ver `build_crew`.
 
     Returns:
-        Uma instancia de `schemas.RelatorioFinanceiro` se o CrewAI conseguiu
-        validar o output do Orquestrador contra o schema Pydantic (caminho
-        esperado). Se, por alguma razao, a validacao Pydantic falhar (ex: o
-        LLM devolveu algo irrecuperavel), devolve o output em bruto (string
-        ou dict) para nao perder o resultado -- quem chama esta funcao deve
-        verificar o tipo devolvido (ver main.py para o padrao recomendado).
+        Uma instancia de `schemas.RelatorioFinanceiro` se conseguirmos
+        extrair e validar JSON valido a partir do output do Orquestrador
+        (caminho esperado). Se isso falhar (ex: o LLM devolveu algo
+        irrecuperavel), devolve o texto em bruto (str) para nao perder o
+        resultado -- quem chama esta funcao deve verificar o tipo devolvido
+        (ver main.py para o padrao recomendado).
 
     Raises:
         Exception: se o rate limit da Groq persistir mesmo apos os retries
             com backoff (ver `_kickoff_with_retry`) -- o tipo exato depende
-            do caminho interno do CrewAI/instructor, por isso quem chama
-            esta funcao deve verificar a mensagem em vez de um tipo especifico
-            (ver `_is_rate_limit_error` para o mesmo criterio usado aqui).
+            do caminho interno do CrewAI/litellm, por isso quem chama esta
+            funcao deve verificar a mensagem em vez de um tipo especifico
+            (ver `is_rate_limit_error` para o mesmo criterio usado aqui).
     """
-    crew = build_crew()
+    if stage_callback is not None:
+        stage_callback("noticias")
+
+    crew = build_crew(stage_callback=stage_callback)
     logger.info("A iniciar analise para asset_name=%s, ticker=%s", asset_name, ticker)
 
     crew_output = _kickoff_with_retry(crew, {"asset_name": asset_name, "ticker": ticker})
 
-    if crew_output.pydantic is not None:
-        return crew_output.pydantic
+    if stage_callback is not None:
+        stage_callback("concluido")
+
+    report = _extract_json_report(crew_output.raw)
+    if report is not None:
+        return report
 
     logger.warning(
-        "O output do Orquestrador não passou na validação Pydantic estrita "
-        "(RelatorioFinanceiro). A devolver o output em bruto -- ver "
-        "'notas_de_validacao' não estará disponível neste caso."
+        "Não foi possível extrair um RelatorioFinanceiro válido do output do "
+        "Orquestrador. A devolver o texto em bruto -- ver main.py para como "
+        "isto é tratado (status 'invalid_schema')."
     )
-    return crew_output.json_dict or crew_output.raw
+    return crew_output.raw
 
 
 if __name__ == "__main__":

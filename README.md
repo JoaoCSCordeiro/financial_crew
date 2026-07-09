@@ -14,6 +14,7 @@ enforce factual grounding and prevent hallucinated data.
 | 3     | Agent definitions                         | Done      |
 | 4     | Task and Crew assembly                    | Done      |
 | 5     | Production output (strict schema)         | Done      |
+| —     | Frontend dashboard (Flask)                | Done      |
 
 ## Architecture
 
@@ -42,9 +43,11 @@ financial_crew/
 ├── llm_config.py          # LLM configuration and connectivity test (Groq)
 ├── agents.py               # Agent definitions (News Analyst, Technical Analyst, Orchestrator)
 ├── tasks.py                 # Task definitions bound to each agent
-├── crew.py                  # Crew assembly and execution entrypoint
-├── schemas.py                # Pydantic schema enforced on the final report
+├── crew.py                  # Crew assembly, execution, manual JSON extraction/validation
+├── schemas.py                # Pydantic schema for the final report
 ├── main.py                    # Production entrypoint (CLI, batch execution, error isolation)
+├── frontend/
+│   └── app.py                  # Flask dashboard (reads output/*.json, live-updating UI)
 └── tools/
     ├── __init__.py
     ├── exceptions.py         # Custom exception hierarchy
@@ -198,17 +201,20 @@ crewAI ships an official fix, this patch (clearly marked with a `TODO` in
 ### Block 5 — Strict schema and production entrypoint
 
 `schemas.py` defines the exact Pydantic structure (`RelatorioFinanceiro`)
-the Orchestrator's output must satisfy. It is attached to the validation
-task via `output_pydantic`, so CrewAI validates the LLM's JSON against the
-schema automatically, instead of relying on the LLM to "just write valid
-JSON".
+the Orchestrator's output must satisfy. Rather than forcing this via
+CrewAI's `output_pydantic` (which relies on tool-call-forced structured
+output — unreliable on Groq's `gpt-oss` models, see "Known Issues"
+below), `crew.py` extracts the JSON object from the Orchestrator's raw
+text output with a regex and validates it manually against the schema
+(`_extract_json_report`). This is both more robust and cheaper (one
+fewer LLM round-trip per analysis).
 
 `main.py` wraps everything in a batch-friendly, fault-isolated entrypoint:
 each asset is analyzed independently (one failure does not abort the
 others), validated reports are saved to `output/<TICKER>_<timestamp>.json`,
 and a summary with per-asset status is printed at the end.
 
-Run the default set of assets (Apple, Tesla, Bitcoin, Ethereum, Microsoft):
+Run the default set of assets (Apple, Tesla):
 
 ```bash
 python main.py
@@ -217,42 +223,97 @@ python main.py
 Run specific assets only:
 
 ```bash
-python main.py --ticker Tesla:TSLA --ticker Bitcoin:BTC-USD
+python main.py --ticker Bitcoin:BTC-USD --ticker Microsoft:MSFT
 ```
 
 Expected output: a per-asset status line (`SUCCESS`, `LLM_ERROR`,
-`TOOL_ERROR`, `INVALID_SCHEMA`, or `UNEXPECTED_ERROR`), a summary count,
-and a process exit code of `0` if all assets succeeded or `1` otherwise
-(useful for CI/scripting). Successful reports are written as JSON files
-under `output/`.
+`TOOL_ERROR`, `INVALID_SCHEMA`, `RATE_LIMIT_ERROR`, or
+`UNEXPECTED_ERROR`), a summary count, and a process exit code of `0` if
+all assets succeeded or `1` otherwise (useful for CI/scripting).
+Successful reports are written as JSON files under `output/`.
+
+### Frontend dashboard
+
+`frontend/app.py` is a Flask app that triggers real analyses directly from
+the browser -- it does not depend on reports already existing in
+`output/`. On load it shows a selection panel with the 2 available assets
+(Apple, Tesla); picking one or more and clicking "Analisar selecionados"
+enqueues them to a single background worker thread (sequential by design,
+to avoid doubling up on Groq's rate limit), and the dashboard polls
+`/api/status` every 4 seconds, showing a shimmering skeleton card while
+each analysis runs and swapping in the full animated card (price, trend,
+sentiment gauge, headlines) the moment it completes. Reports are also
+saved to `output/<TICKER>_<timestamp>.json` as a side effect, same as
+`main.py`, and any reports already on disk are loaded on startup so the
+dashboard has continuity across restarts.
+
+Run it (`main.py` does not need to be running separately -- the frontend
+calls the same `crew.run_analysis` directly):
+
+```bash
+python frontend/app.py
+```
+
+Then open http://localhost:5000 in a browser, select assets, and click
+"Analisar selecionados". A full analysis still takes 1-2 minutes per
+asset because of the rate-limit pauses described below.
 
 ### Groq free tier rate limits
 
-The `openai/gpt-oss-120b` model is capped at 8000 tokens per minute on
-Groq's free tier. A single full analysis makes 4 LLM calls in quick
-succession (news task, technical task, orchestrator task, plus one extra
-call from `instructor` to enforce the Pydantic schema) -- this alone can
-saturate the per-minute budget before the run even finishes, regardless
-of any delay *between* assets.
+The `openai/gpt-oss-120b` model is capped at 8000 tokens per minute and
+200,000 tokens per day on Groq's free tier. A single full analysis makes
+3 LLM calls in quick succession (news task, technical task, orchestrator
+task) -- this alone can saturate the per-minute budget before the run
+even finishes, regardless of any delay *between* assets.
 
 The fix is a deliberate pause *within* each analysis: `tasks.py` attaches
 a callback to the news and technical tasks that sleeps for
 `SECONDS_BETWEEN_TASKS` (25s by default) after each one completes. This
-spreads the 4 LLM calls of a single asset across a wider time window, so
+spreads the 3 LLM calls of a single asset across a wider time window, so
 the rolling per-minute limit has room to recover between calls.
 `main.py` additionally waits `SECONDS_BETWEEN_ASSETS` (30s) between
 assets in a batch run, and `crew.py` retries with exponential backoff as
-a last-resort safety net if a rate limit is still hit.
+a last-resort safety net if a per-minute rate limit is still hit.
 
-As a result, a full run of all 5 default assets takes several minutes
-(each asset's own pauses plus the inter-asset wait). If you still see
-`RATE_LIMIT_ERROR` in the summary, increase `SECONDS_BETWEEN_TASKS` in
-`tasks.py` and/or `SECONDS_BETWEEN_ASSETS` in `main.py`, or check your
-usage at https://console.groq.com/settings/billing.
+The **daily** limit (200,000 tokens) is a hard ceiling that no amount of
+waiting-within-the-run can work around -- if you exhaust it, you have to
+wait for the daily reset (shown in the error message, e.g. "try again in
+3m46s" if you're near the boundary, or several hours if you've just
+exhausted it) or switch to a different Groq account/model. This is also
+why the default asset list was trimmed down to 2 (Apple, Tesla): running
+all 5 original assets repeatedly during development exhausted the daily
+budget.
+
+If you still see `RATE_LIMIT_ERROR` in the summary, increase
+`SECONDS_BETWEEN_TASKS` in `tasks.py` and/or `SECONDS_BETWEEN_ASSETS` in
+`main.py`, or check your usage at
+https://console.groq.com/settings/billing.
+
+## Known Issues
+
+### Groq tool-call-forced structured output is unreliable
+
+CrewAI's `output_pydantic` (and `instructor`, which it uses internally)
+forces the LLM to respond via a tool call so the JSON can be validated
+against a schema automatically. On Groq's `gpt-oss` models this is
+flaky: the model sometimes emits the correct JSON as plain text instead
+of a formal tool call, and Groq's API rejects this with a `400
+tool_use_failed` error ("Tool choice is required, but model did not call
+a tool") even though the generated content itself is correct and visible
+in the error's `failed_generation` field. This is a known ecosystem-wide
+issue (see e.g. [pydantic/pydantic-ai#4350](https://github.com/pydantic/pydantic-ai/issues/4350),
+which documents the same underlying Groq behavior).
+
+The project works around this by not using `output_pydantic` at all:
+`crew.py`'s `_extract_json_report` pulls the JSON object out of the
+Orchestrator's plain-text output with a regex and validates it manually
+against `schemas.RelatorioFinanceiro`. This is both more reliable and
+slightly cheaper (no extra `instructor` round-trip).
 
 ## Roadmap
 
-All five planned blocks are complete. Possible next steps beyond the
-original scope: a lightweight API wrapper (FastAPI) around `main.py`,
-persistence to a database instead of flat JSON files, and a scheduled/cron
+All five planned blocks are complete, plus a Flask-based frontend
+dashboard. Possible next steps beyond the original scope: WebSocket-based
+live updates instead of polling, persistence to a database instead of
+flat JSON files, and a scheduled/cron
 execution mode for periodic reports.

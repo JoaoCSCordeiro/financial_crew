@@ -36,13 +36,13 @@ logger = logging.getLogger(__name__)
 # no maximo ~2-3 ativos por minuto sem esbarrar no limite.
 SECONDS_BETWEEN_ASSETS = 30
 
-# Ativos suportados por default, conforme definido no ambito do projeto.
+# Ativos suportados por default. Reduzido a 2 para caber confortavelmente no
+# free tier da Groq (8000 TPM / 200000 TPD) sem esgotar a quota diaria a meio
+# de uma execucao. Usa --ticker para analisar outros ativos (Bitcoin, Ethereum,
+# Microsoft, etc.) individualmente quando tiveres quota disponivel.
 DEFAULT_ASSETS: dict[str, str] = {
     "Apple": "AAPL",
     "Tesla": "TSLA",
-    "Bitcoin": "BTC-USD",
-    "Ethereum": "ETH-USD",
-    "Microsoft": "MSFT",
 }
 
 OUTPUT_DIR = Path("output")
@@ -104,16 +104,15 @@ def analyze_one(asset_name: str, ticker: str) -> dict:
 
     if not isinstance(result, RelatorioFinanceiro):
         logger.warning(
-            "Resultado para %s nao respeitou o schema RelatorioFinanceiro "
-            "(o CrewAI nao conseguiu validar o output do Orquestrador). "
-            "Resultado em bruto nao sera guardado em disco.",
+            "Não foi possível extrair um RelatorioFinanceiro válido do output "
+            "do Orquestrador para %s. Resultado em bruto não será guardado em disco.",
             asset_name,
         )
         return {
             "asset_name": asset_name,
             "ticker": ticker,
             "status": "invalid_schema",
-            "detail": "O output do LLM nao passou na validacao Pydantic estrita.",
+            "detail": "O output do LLM não continha JSON válido que respeitasse o schema.",
         }
 
     filepath = _save_report(asset_name, ticker, result)
@@ -173,8 +172,7 @@ def _parse_args() -> argparse.Namespace:
         help=(
             "Analisar um ativo especifico, no formato 'NomeDoAtivo:TICKER' "
             "(ex: --ticker Tesla:TSLA). Pode ser repetido para varios ativos. "
-            "Se omitido, usa a lista default do projeto (Apple, Tesla, Bitcoin, "
-            "Ethereum, Microsoft)."
+            "Se omitido, usa a lista default do projeto (Apple, Tesla)."
         ),
     )
     return parser.parse_args()

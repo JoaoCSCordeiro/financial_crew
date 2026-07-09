@@ -15,8 +15,6 @@ import time
 
 from crewai import Agent, Task
 
-from schemas import RelatorioFinanceiro
-
 # Pausa entre tarefas do MESMO ativo, para respeitar o rate limit gratuito
 # da Groq (8000 tokens/minuto no modelo openai/gpt-oss-120b). Uma analise
 # completa faz 4 chamadas ao LLM (noticias, tecnico, orquestrador + a
@@ -27,12 +25,22 @@ from schemas import RelatorioFinanceiro
 SECONDS_BETWEEN_TASKS = 25
 
 
-def _pause_after_task(task_output) -> None:
-    """Callback executado apos cada tarefa, para espacar chamadas ao LLM."""
-    time.sleep(SECONDS_BETWEEN_TASKS)
+def _make_task_callback(on_stage_change=None, next_stage: str | None = None):
+    """
+    Constroi o callback executado quando uma tarefa termina: espaca a
+    proxima chamada ao LLM (rate limit da Groq) e, opcionalmente, avisa
+    quem estiver a ouvir (ex: o frontend) de que a analise avancou para a
+    proxima fase do pipeline.
+    """
+    def _callback(task_output) -> None:
+        if on_stage_change is not None and next_stage is not None:
+            on_stage_change(next_stage)
+        time.sleep(SECONDS_BETWEEN_TASKS)
+
+    return _callback
 
 
-def build_news_task(agent: Agent) -> Task:
+def build_news_task(agent: Agent, on_stage_change=None) -> Task:
     """Tarefa do Agente 1: recolher e resumir noticias recentes do ativo."""
     return Task(
         description=(
@@ -52,11 +60,11 @@ def build_news_task(agent: Agent) -> Task:
             "falhou ou nao devolveu resultados."
         ),
         agent=agent,
-        callback=_pause_after_task,
+        callback=_make_task_callback(on_stage_change, next_stage="tecnico"),
     )
 
 
-def build_technical_task(agent: Agent) -> Task:
+def build_technical_task(agent: Agent, on_stage_change=None) -> Task:
     """Tarefa do Agente 2: obter e interpretar dados tecnicos do ativo."""
     return Task(
         description=(
@@ -75,7 +83,7 @@ def build_technical_task(agent: Agent) -> Task:
             "explicito indicando se a obtencao de dados falhou."
         ),
         agent=agent,
-        callback=_pause_after_task,
+        callback=_make_task_callback(on_stage_change, next_stage="orquestrador"),
     )
 
 
@@ -124,5 +132,4 @@ def build_validation_task(agent: Agent, context_tasks: list[Task]) -> Task:
         ),
         agent=agent,
         context=context_tasks,
-        output_pydantic=RelatorioFinanceiro,
     )
