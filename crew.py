@@ -11,6 +11,7 @@ outputs dos outros dois como contexto (ver `context=context_tasks` em
 import json
 import logging
 import re
+import time
 
 from crewai import Crew, Process
 from pydantic import ValidationError
@@ -21,6 +22,7 @@ from agents import (
     build_orchestrator_agent,
     build_technical_analyst_agent,
 )
+from metrics import record_analysis
 from schemas import RelatorioFinanceiro
 from tasks import build_news_task, build_technical_task, build_validation_task
 
@@ -44,7 +46,11 @@ def is_rate_limit_error(exc: BaseException) -> bool:
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         message = str(current).lower()
-        if "rate_limit_exceeded" in message or "rate limit" in message or "429" in message:
+        if (
+            "rate_limit_exceeded" in message
+            or "rate limit" in message
+            or "429" in message
+        ):
             return True
         current = current.__cause__
     return False
@@ -100,7 +106,9 @@ def build_crew(stage_callback=None) -> Crew:
     orchestrator_agent = build_orchestrator_agent()
 
     news_task = build_news_task(news_agent, on_stage_change=stage_callback)
-    technical_task = build_technical_task(technical_agent, on_stage_change=stage_callback)
+    technical_task = build_technical_task(
+        technical_agent, on_stage_change=stage_callback
+    )
     validation_task = build_validation_task(
         orchestrator_agent, context_tasks=[news_task, technical_task]
     )
@@ -158,22 +166,52 @@ def run_analysis(asset_name: str, ticker: str, stage_callback=None):
     if stage_callback is not None:
         stage_callback("noticias")
 
+    start_time = time.monotonic()
     crew = build_crew(stage_callback=stage_callback)
     logger.info("A iniciar analise para asset_name=%s, ticker=%s", asset_name, ticker)
 
-    crew_output = _kickoff_with_retry(crew, {"asset_name": asset_name, "ticker": ticker})
+    try:
+        crew_output = _kickoff_with_retry(
+            crew, {"asset_name": asset_name, "ticker": ticker}
+        )
+    except Exception as exc:
+        duration = time.monotonic() - start_time
+        record_analysis(
+            asset_name,
+            ticker,
+            duration,
+            status="error",
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+
+    duration = time.monotonic() - start_time
 
     if stage_callback is not None:
         stage_callback("concluido")
 
+    tokens = None
+    usage = getattr(crew_output, "token_usage", None)
+    if usage is not None:
+        tokens = {
+            "total": getattr(usage, "total_tokens", None),
+            "prompt": getattr(usage, "prompt_tokens", None),
+            "completion": getattr(usage, "completion_tokens", None),
+            "successful_requests": getattr(usage, "successful_requests", None),
+        }
+
     report = _extract_json_report(crew_output.raw)
     if report is not None:
+        record_analysis(asset_name, ticker, duration, status="success", tokens=tokens)
         return report
 
     logger.warning(
         "Não foi possível extrair um RelatorioFinanceiro válido do output do "
         "Orquestrador. A devolver o texto em bruto -- ver main.py para como "
         "isto é tratado (status 'invalid_schema')."
+    )
+    record_analysis(
+        asset_name, ticker, duration, status="invalid_schema", tokens=tokens
     )
     return crew_output.raw
 
@@ -186,11 +224,13 @@ if __name__ == "__main__":
     print("--- Teste de montagem da Crew (Bloco 4) ---")
     try:
         crew = build_crew()
-        print(f"Crew montada com {len(crew.agents)} agentes e {len(crew.tasks)} tarefas.")
+        print(
+            f"Crew montada com {len(crew.agents)} agentes e {len(crew.tasks)} tarefas."
+        )
         for i, task in enumerate(crew.tasks, start=1):
             print(f"  Tarefa {i}: agente='{task.agent.role}'")
         print("\nCrew montada com sucesso. Para executar uma analise real, usa:")
-        print('  from crew import run_analysis')
+        print("  from crew import run_analysis")
         print('  run_analysis(asset_name="Tesla", ticker="TSLA")')
     except Exception as exc:
         print(f"Falha ao montar a Crew: {type(exc).__name__}: {exc}")

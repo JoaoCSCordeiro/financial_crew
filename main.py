@@ -75,16 +75,29 @@ def analyze_one(asset_name: str, ticker: str) -> dict:
     try:
         result = run_analysis(asset_name=asset_name, ticker=ticker)
     except LLMConfigError as exc:
-        logger.error("Falha de configuracao/ligacao ao LLM para %s: %s", asset_name, exc)
-        return {"asset_name": asset_name, "ticker": ticker, "status": "llm_error", "detail": str(exc)}
+        logger.error(
+            "Falha de configuracao/ligacao ao LLM para %s: %s", asset_name, exc
+        )
+        return {
+            "asset_name": asset_name,
+            "ticker": ticker,
+            "status": "llm_error",
+            "detail": str(exc),
+        }
     except FinancialToolError as exc:
         logger.error("Falha numa ferramenta de dados para %s: %s", asset_name, exc)
-        return {"asset_name": asset_name, "ticker": ticker, "status": "tool_error", "detail": str(exc)}
+        return {
+            "asset_name": asset_name,
+            "ticker": ticker,
+            "status": "tool_error",
+            "detail": str(exc),
+        }
     except Exception as exc:
         if is_rate_limit_error(exc):
             logger.error(
                 "Rate limit da Groq excedido para %s mesmo apos retries com backoff: %s",
-                asset_name, exc,
+                asset_name,
+                exc,
             )
             return {
                 "asset_name": asset_name,
@@ -149,7 +162,9 @@ def main(assets: dict[str, str]) -> int:
     print("=" * 60)
     for summary in summaries:
         status_label = summary["status"].upper()
-        print(f"[{status_label:15}] {summary['asset_name']:12} ({summary['ticker']:8}) -> {summary['detail']}")
+        print(
+            f"[{status_label:15}] {summary['asset_name']:12} ({summary['ticker']:8}) -> {summary['detail']}"
+        )
     print("=" * 60)
 
     failures = [s for s in summaries if s["status"] != "success"]
@@ -185,7 +200,9 @@ if __name__ == "__main__":
         try:
             selected_assets = dict(pair.split(":", 1) for pair in args.ticker)
         except ValueError:
-            print("Erro: --ticker tem de estar no formato 'NomeDoAtivo:TICKER' (ex: Tesla:TSLA)")
+            print(
+                "Erro: --ticker tem de estar no formato 'NomeDoAtivo:TICKER' (ex: Tesla:TSLA)"
+            )
             sys.exit(2)
     else:
         selected_assets = DEFAULT_ASSETS

@@ -20,14 +20,18 @@ class DadosTecnicos(BaseModel):
     """Dados de mercado consolidados, rastreaveis ate a ferramenta yfinance."""
 
     preco_atual: Optional[float] = Field(
-        default=None, description="Preco atual do ativo, exatamente como devolvido pela ferramenta."
+        default=None,
+        description="Preco atual do ativo, exatamente como devolvido pela ferramenta.",
     )
-    moeda: Optional[str] = Field(default=None, description="Moeda do preco (ex: 'USD').")
+    moeda: Optional[str] = Field(
+        default=None, description="Moeda do preco (ex: 'USD')."
+    )
     variacao_percentual_1_mes: Optional[float] = Field(
         default=None, description="Variacao percentual no ultimo mes."
     )
     tendencia: Optional[Literal["alta", "baixa", "lateral"]] = Field(
-        default=None, description="Tendencia identificada com base no historico de 1 mes."
+        default=None,
+        description="Tendencia identificada com base no historico de 1 mes.",
     )
     dados_indisponiveis: bool = Field(
         default=False,
@@ -38,8 +42,11 @@ class DadosTecnicos(BaseModel):
 class AnaliseNoticias(BaseModel):
     """Analise de sentimento de noticias, rastreavel ate a ferramenta ddgs."""
 
-    sentimento_geral: Optional[Literal["positivo", "negativo", "neutro", "misto"]] = Field(
-        default=None, description="Sentimento geral identificado a partir das noticias recolhidas."
+    sentimento_geral: Optional[Literal["positivo", "negativo", "neutro", "misto"]] = (
+        Field(
+            default=None,
+            description="Sentimento geral identificado a partir das noticias recolhidas.",
+        )
     )
     titulos_usados: list[str] = Field(
         default_factory=list,

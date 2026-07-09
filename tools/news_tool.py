@@ -34,9 +34,12 @@ class NewsSearchSchema(BaseModel):
     """Schema de input validado para a ferramenta de notícias."""
 
     asset_name: str = Field(
-        ..., description="Nome do ativo em linguagem natural, ex: 'Tesla', 'Bitcoin', 'Apple'"
+        ...,
+        description="Nome do ativo em linguagem natural, ex: 'Tesla', 'Bitcoin', 'Apple'",
     )
-    max_results: int = Field(default=5, ge=1, le=10, description="Número máximo de títulos a devolver")
+    max_results: int = Field(
+        default=5, ge=1, le=10, description="Número máximo de títulos a devolver"
+    )
 
 
 @retry(
@@ -76,17 +79,25 @@ def get_recent_news(asset_name: str, max_results: int = 5) -> Dict[str, Any]:
     try:
         raw_results = _run_ddg_news_search(query, max_results)
     except (RatelimitException, TimeoutException) as exc:
-        logger.error("Rate limit / timeout do DuckDuckGo para '%s': %s", asset_name, exc)
+        logger.error(
+            "Rate limit / timeout do DuckDuckGo para '%s': %s", asset_name, exc
+        )
         raise NewsSearchError(
             f"O DuckDuckGo aplicou rate limiting à pesquisa de '{asset_name}' após múltiplas tentativas. "
             "Tenta novamente dentro de alguns minutos."
         ) from exc
     except DuckDuckGoSearchException as exc:
         logger.error("Erro genérico do DuckDuckGo para '%s': %s", asset_name, exc)
-        raise NewsSearchError(f"Falha na pesquisa de notícias para '{asset_name}': {exc}") from exc
+        raise NewsSearchError(
+            f"Falha na pesquisa de notícias para '{asset_name}': {exc}"
+        ) from exc
     except Exception as exc:
-        logger.error("Erro inesperado na pesquisa de notícias para '%s': %s", asset_name, exc)
-        raise NewsSearchError(f"Erro inesperado ao pesquisar notícias para '{asset_name}': {exc}") from exc
+        logger.error(
+            "Erro inesperado na pesquisa de notícias para '%s': %s", asset_name, exc
+        )
+        raise NewsSearchError(
+            f"Erro inesperado ao pesquisar notícias para '{asset_name}': {exc}"
+        ) from exc
 
     if not raw_results:
         # Lista vazia não é necessariamente um erro (pode não haver notícias),

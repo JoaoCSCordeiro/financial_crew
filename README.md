@@ -15,6 +15,9 @@ enforce factual grounding and prevent hallucinated data.
 | 4     | Task and Crew assembly                    | Done      |
 | 5     | Production output (strict schema)         | Done      |
 | —     | Frontend dashboard (Flask)                | Done      |
+| —     | Automated tests (pytest)                  | Done      |
+| —     | CI/CD (GitHub Actions)                    | Done      |
+| —     | Observability & metrics                   | Done      |
 
 ## Architecture
 
@@ -39,15 +42,28 @@ and formats.
 ```
 financial_crew/
 ├── requirements.txt
+├── requirements-dev.txt
 ├── .gitignore
+├── .coveragerc
+├── .github/
+│   └── workflows/
+│       └── ci.yml               # GitHub Actions: lint, format check, tests (on push/PR)
 ├── llm_config.py          # LLM configuration and connectivity test (Groq)
 ├── agents.py               # Agent definitions (News Analyst, Technical Analyst, Orchestrator)
 ├── tasks.py                 # Task definitions bound to each agent
 ├── crew.py                  # Crew assembly, execution, manual JSON extraction/validation
 ├── schemas.py                # Pydantic schema for the final report
-├── main.py                    # Production entrypoint (CLI, batch execution, error isolation)
+├── metrics.py                 # Observability: duration/token metrics per analysis
+├── main.py                     # Production entrypoint (CLI, batch execution, error isolation)
 ├── frontend/
-│   └── app.py                  # Flask dashboard (reads output/*.json, live-updating UI)
+│   └── app.py                   # Flask dashboard (triggers analyses, live-updating UI)
+├── tests/
+│   ├── conftest.py
+│   ├── test_market_data_tool.py
+│   ├── test_news_tool.py
+│   ├── test_schemas.py
+│   ├── test_crew_json_extraction.py
+│   └── test_metrics.py
 └── tools/
     ├── __init__.py
     ├── exceptions.py         # Custom exception hierarchy
@@ -180,7 +196,7 @@ fabricated data. Network and rate-limit errors are retried automatically
 with exponential backoff (via `tenacity`); data errors (e.g. an invalid
 ticker) are not retried, since retrying will not change the outcome.
 
-## Known Issues
+## Implementation Notes
 
 ### crewAI + Groq: "cache_breakpoint is unsupported"
 
@@ -309,6 +325,57 @@ The project works around this by not using `output_pydantic` at all:
 Orchestrator's plain-text output with a regex and validates it manually
 against `schemas.RelatorioFinanceiro`. This is both more reliable and
 slightly cheaper (no extra `instructor` round-trip).
+
+## Testing
+
+Unit tests live in `tests/` and never touch the network or the Groq API —
+`yfinance`, `ddgs`, and the LLM are all mocked. They cover:
+
+- `tools/market_data_tool.py` and `tools/news_tool.py`: success paths and
+  every typed error path (invalid ticker, empty results, rate limits,
+  network failures)
+- `schemas.py`: valid and invalid `RelatorioFinanceiro` payloads
+- `crew._extract_json_report`: the manual JSON extraction/validation logic
+  described above, including the realistic "messy" cases (JSON wrapped in
+  prose or markdown fences, malformed JSON, schema violations)
+- `metrics.py`: recording, reading, and summarizing
+
+Install dev dependencies and run:
+
+```bash
+pip install -r requirements-dev.txt
+pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
+## CI/CD
+
+`.github/workflows/ci.yml` runs on every push and pull request, on Python
+3.11 and 3.12: installs dependencies, lints with `ruff`, checks formatting
+with `black`, and runs the full test suite with coverage. A `GROQ_API_KEY`
+placeholder is injected purely so modules that check for its presence at
+import/call time (but never actually call the API in tests) don't error
+out — no real API calls happen in CI.
+
+## Observability & Metrics
+
+Every call to `crew.run_analysis` — success or failure — is recorded to
+`metrics/metrics.jsonl` (one JSON object per line) via `metrics.py`:
+duration, token usage (`total`/`prompt`/`completion`/`successful_requests`,
+read from CrewAI's `CrewOutput.token_usage`), final status, and the error
+message when applicable.
+
+View a summary from the command line:
+
+```bash
+python metrics.py
+```
+
+Or from the frontend: the dashboard shows a live metrics bar (total runs,
+success rate, average duration, total tokens) above the asset cards,
+refreshed after every analysis. This is deliberately simple (a flat JSONL
+file, no external time-series database) — appropriate for a personal/demo
+project, but the schema is structured enough to be loaded into pandas or
+a real metrics backend later if needed.
 
 ## Roadmap
 

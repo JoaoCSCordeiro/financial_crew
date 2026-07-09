@@ -32,6 +32,7 @@ def _make_task_callback(on_stage_change=None, next_stage: str | None = None):
     quem estiver a ouvir (ex: o frontend) de que a analise avancou para a
     proxima fase do pipeline.
     """
+
     def _callback(task_output) -> None:
         if on_stage_change is not None and next_stage is not None:
             on_stage_change(next_stage)

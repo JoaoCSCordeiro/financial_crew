@@ -38,3 +38,13 @@ crew_tasks_output.json
 
 # Relatorios gerados (main.py)
 output/
+
+# Metricas geradas (metrics.py)
+metrics/
+
+# Testes / cobertura
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/

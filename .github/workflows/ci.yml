@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Check formatting with black
+        run: black --check .
+
+      - name: Run tests with coverage
+        env:
+          # Chave falsa: nenhum teste chama a API real da Groq (ver tests/),
+          # mas llm_config.get_llm() valida a presenca desta variavel antes
+          # de qualquer outra coisa, e alguns modulos (crew.py, agents.py)
+          # sao importados durante a recolha de testes.
+          GROQ_API_KEY: "ci-placeholder-key"
+          GROQ_MODEL: "openai/gpt-oss-120b"
+        run: |
+          pytest tests/ -v --cov=. --cov-report=term-missing --cov-report=xml \
+            --cov-config=.coveragerc
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: matrix.python-version == '3.12'
+        with:
+          name: coverage-report
+          path: coverage.xml

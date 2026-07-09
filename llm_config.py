@@ -85,7 +85,11 @@ def get_llm(temperature: float = 0.2) -> LLM:
 
     model_name = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
-    logger.info("A configurar LLM: provider=groq, model=%s, temperature=%s", model_name, temperature)
+    logger.info(
+        "A configurar LLM: provider=groq, model=%s, temperature=%s",
+        model_name,
+        temperature,
+    )
 
     try:
         return LLM(
@@ -143,7 +147,9 @@ def test_llm_connection() -> str:
         # RateLimitError) que não estão tipadas aqui de propósito -- preferimos
         # apanhar tudo e reportar com contexto, para o utilizador perceber já
         # se é a chave, o modelo, ou a rede.
-        raise LLMConfigError(f"Erro ao chamar o LLM (Groq): {type(exc).__name__}: {exc}") from exc
+        raise LLMConfigError(
+            f"Erro ao chamar o LLM (Groq): {type(exc).__name__}: {exc}"
+        ) from exc
 
     if not response or not response.strip():
         raise LLMConfigError(

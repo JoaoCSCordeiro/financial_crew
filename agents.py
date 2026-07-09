@@ -127,7 +127,9 @@ def build_orchestrator_agent() -> Agent:
             "5. O teu output final tem de ser JSON válido e nada mais — sem "
             "   comentários, sem markdown, sem texto antes ou depois."
         ),
-        llm=get_llm(temperature=0.0),  # temperatura zero: este agente não deve "criar", só validar
+        llm=get_llm(
+            temperature=0.0
+        ),  # temperatura zero: este agente não deve "criar", só validar
         verbose=True,
         allow_delegation=False,
     )

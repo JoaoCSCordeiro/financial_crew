@@ -1,0 +1,5 @@
+# Dependências de desenvolvimento e CI (não necessárias para correr o projeto em produção).
+pytest>=8.0.0
+pytest-cov>=5.0.0
+ruff>=0.6.0
+black>=24.0.0

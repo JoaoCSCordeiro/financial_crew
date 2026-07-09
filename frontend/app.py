@@ -15,14 +15,15 @@ import json
 import queue
 import sys
 import threading
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template_string, request
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(BASE_DIR))  # permite `python frontend/app.py` a partir de qualquer diretoria
+sys.path.insert(
+    0, str(BASE_DIR)
+)  # permite `python frontend/app.py` a partir de qualquer diretoria
 
 from crew import is_rate_limit_error, run_analysis  # noqa: E402
 from llm_config import LLMConfigError  # noqa: E402
@@ -60,11 +61,15 @@ def _set_job(ticker: str, **fields) -> None:
         _jobs.setdefault(ticker, {}).update(fields)
 
 
-def _save_report_to_disk(asset_name: str, ticker: str, report: RelatorioFinanceiro) -> Path:
+def _save_report_to_disk(
+    asset_name: str, ticker: str, report: RelatorioFinanceiro
+) -> Path:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     filepath = OUTPUT_DIR / f"{ticker}_{timestamp}.json"
-    filepath.write_text(json.dumps(report.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8")
+    filepath.write_text(
+        json.dumps(report.model_dump(), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return filepath
 
 
@@ -76,28 +81,54 @@ def _worker_loop() -> None:
     """
     while True:
         asset_name, ticker = _job_queue.get()
-        _set_job(ticker, status="running", asset_name=asset_name, detail=None, stage="noticias")
+        _set_job(
+            ticker,
+            status="running",
+            asset_name=asset_name,
+            detail=None,
+            stage="noticias",
+        )
 
         def _on_stage_change(stage: str, _ticker=ticker) -> None:
             _set_job(_ticker, stage=stage)
 
         try:
-            result = run_analysis(asset_name=asset_name, ticker=ticker, stage_callback=_on_stage_change)
+            result = run_analysis(
+                asset_name=asset_name, ticker=ticker, stage_callback=_on_stage_change
+            )
         except LLMConfigError as exc:
-            _set_job(ticker, status="error", detail=f"Erro de configuração do LLM: {exc}")
+            _set_job(
+                ticker, status="error", detail=f"Erro de configuração do LLM: {exc}"
+            )
         except FinancialToolError as exc:
-            _set_job(ticker, status="error", detail=f"Erro numa ferramenta de dados: {exc}")
+            _set_job(
+                ticker, status="error", detail=f"Erro numa ferramenta de dados: {exc}"
+            )
         except Exception as exc:  # noqa: BLE001
             if is_rate_limit_error(exc):
-                _set_job(ticker, status="error", detail="Rate limit da Groq excedido. Tenta novamente daqui a alguns minutos.")
+                _set_job(
+                    ticker,
+                    status="error",
+                    detail="Rate limit da Groq excedido. Tenta novamente daqui a alguns minutos.",
+                )
             else:
-                _set_job(ticker, status="error", detail=f"Erro inesperado: {type(exc).__name__}: {exc}")
+                _set_job(
+                    ticker,
+                    status="error",
+                    detail=f"Erro inesperado: {type(exc).__name__}: {exc}",
+                )
         else:
             if isinstance(result, RelatorioFinanceiro):
                 _save_report_to_disk(asset_name, ticker, result)
-                _set_job(ticker, status="success", report=result.model_dump(), detail=None)
+                _set_job(
+                    ticker, status="success", report=result.model_dump(), detail=None
+                )
             else:
-                _set_job(ticker, status="error", detail="O LLM não devolveu um relatório JSON válido.")
+                _set_job(
+                    ticker,
+                    status="error",
+                    detail="O LLM não devolveu um relatório JSON válido.",
+                )
         finally:
             _job_queue.task_done()
 
@@ -117,7 +148,9 @@ def _load_existing_reports() -> None:
             latest_by_ticker[ticker] = (data.get("ativo", ticker), data)
 
     for ticker, (asset_name, data) in latest_by_ticker.items():
-        _set_job(ticker, status="success", asset_name=asset_name, report=data, detail=None)
+        _set_job(
+            ticker, status="success", asset_name=asset_name, report=data, detail=None
+        )
 
 
 _load_existing_reports()
@@ -129,7 +162,12 @@ _worker_thread.start()
 @app.route("/api/assets")
 def api_assets():
     """Devolve os ativos disponiveis para o frontend construir a seleccao."""
-    return jsonify([{"asset_name": name, "ticker": ticker} for name, ticker in AVAILABLE_ASSETS.items()])
+    return jsonify(
+        [
+            {"asset_name": name, "ticker": ticker}
+            for name, ticker in AVAILABLE_ASSETS.items()
+        ]
+    )
 
 
 @app.route("/api/analyze", methods=["POST"])
@@ -168,6 +206,14 @@ def api_status():
     """
     with _jobs_lock:
         return jsonify(dict(_jobs))
+
+
+@app.route("/api/metrics")
+def api_metrics():
+    """Devolve o resumo agregado de metricas (ver metrics.py)."""
+    from metrics import summarize
+
+    return jsonify(summarize())
 
 
 @app.route("/")
@@ -643,6 +689,36 @@ DASHBOARD_HTML = r"""
     0%, 100% { box-shadow: 0 0 0 4px rgba(94, 234, 212, 0.18); }
     50% { box-shadow: 0 0 0 8px rgba(94, 234, 212, 0.05); }
   }
+
+  /* --- Barra de metricas (observabilidade) --- */
+  .metrics-bar {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+    padding: 14px 40px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(18, 24, 33, 0.5);
+  }
+
+  .metric-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .metric-value {
+    font-family: var(--font-mono);
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .metric-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
 </style>
 </head>
 <body>
@@ -657,6 +733,8 @@ DASHBOARD_HTML = r"""
   </div>
   <div class="meta" id="last-updated">a carregar…</div>
 </header>
+
+<div class="metrics-bar" id="metrics-bar"></div>
 
 <main>
   <div class="control-panel" id="control-panel">
@@ -977,6 +1055,7 @@ async function fetchStatus() {
       btn.disabled = false;
       btn.textContent = "Analisar selecionados";
       stopPolling();
+      loadMetrics();
     }
   } catch (err) {
     lastUpdated.textContent = "erro ao ligar ao backend";
@@ -994,12 +1073,36 @@ function stopPolling() {
   pollHandle = null;
 }
 
+async function loadMetrics() {
+  const bar = document.getElementById("metrics-bar");
+  try {
+    const res = await fetch("/api/metrics");
+    const m = await res.json();
+
+    if (!m.total_runs) {
+      bar.innerHTML = `<span class="metric-label">Ainda sem execuções registadas -- corre uma análise para veres métricas aqui.</span>`;
+      return;
+    }
+
+    const successPct = m.success_rate !== null ? Math.round(m.success_rate * 100) : "—";
+    bar.innerHTML = `
+      <div class="metric-item"><span class="metric-value">${m.total_runs}</span><span class="metric-label">Execuções</span></div>
+      <div class="metric-item"><span class="metric-value">${successPct}%</span><span class="metric-label">Taxa de sucesso</span></div>
+      <div class="metric-item"><span class="metric-value">${m.avg_duration_seconds ?? "—"}s</span><span class="metric-label">Duração média</span></div>
+      <div class="metric-item"><span class="metric-value">${(m.total_tokens || 0).toLocaleString("pt-PT")}</span><span class="metric-label">Tokens usados (total)</span></div>
+    `;
+  } catch (err) {
+    bar.innerHTML = "";
+  }
+}
+
 async function init() {
   const res = await fetch("/api/assets");
   AVAILABLE_ASSETS = await res.json();
   selectedTickers = new Set(AVAILABLE_ASSETS.slice(0, MAX_SELECTION).map(a => a.ticker));
   renderControlPanel();
   await fetchStatus();
+  await loadMetrics();
 
   const statusRes = await fetch("/api/status");
   const jobs = await statusRes.json();
