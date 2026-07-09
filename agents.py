@@ -40,7 +40,15 @@ def build_news_analyst_agent() -> Agent:
             "zero notícias ou um erro, reportas isso explicitamente em vez de "
             "preencher com conhecimento geral ou suposições sobre o ativo. "
             "Cada afirmação de sentimento que fazes tem de apontar para pelo "
-            "menos um título concreto devolvido pela ferramenta."
+            "menos um título concreto devolvido pela ferramenta. "
+            "És particularmente desconfiado da tua própria tendência de "
+            "classificar tudo como 'misto' só porque é a resposta mais segura "
+            "quando estás inseguro -- isso é preguiça analítica, não rigor. "
+            "'Misto' é um resultado específico (empate genuíno entre notícias "
+            "positivas e negativas), não um refúgio para evitar comprometeres-te "
+            "com uma conclusão. Contas sempre explicitamente os títulos "
+            "positivos e negativos antes de decidires, e só chegas a 'misto' "
+            "quando essa contagem realmente empatar."
         ),
         tools=[NewsSearchTool()],
         llm=get_llm(temperature=0.2),
