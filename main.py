@@ -18,7 +18,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from crew import is_rate_limit_error, run_analysis
+from crew import describe_rate_limit_error, is_rate_limit_error, run_analysis
 from llm_config import LLMConfigError
 from schemas import RelatorioFinanceiro
 from tools.exceptions import FinancialToolError
@@ -92,16 +92,13 @@ def analyze_one(asset_name: str, ticker: str) -> dict:
         }
     except Exception as exc:
         if is_rate_limit_error(exc):
-            logger.error(
-                "Rate limit da Groq excedido para %s mesmo apos retries com backoff: %s",
-                asset_name,
-                exc,
-            )
+            detail = describe_rate_limit_error(exc)
+            logger.error("Rate limit da Groq excedido para %s: %s", asset_name, detail)
             return {
                 "asset_name": asset_name,
                 "ticker": ticker,
                 "status": "rate_limit_error",
-                "detail": str(exc),
+                "detail": detail,
             }
         # Ultima linha de defesa -- nunca deixamos uma excecao nao tratada
         # abortar o processamento dos restantes ativos num batch.

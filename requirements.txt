@@ -1,6 +1,7 @@
 # --- Orquestração de Agentes ---
 crewai>=1.15.0,<2.0.0
 crewai-tools>=0.50.0
+
 fastapi>=0.115.0
 
 # --- LLM Engine (Custo Zero) ---

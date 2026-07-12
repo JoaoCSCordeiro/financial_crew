@@ -26,7 +26,8 @@ sys.path.insert(
     0, str(BASE_DIR)
 )  # permite `python frontend/app.py` a partir de qualquer diretoria
 
-from crew import is_rate_limit_error, run_analysis  # noqa: E402
+from crew import describe_rate_limit_error, is_rate_limit_error  # noqa: E402
+from crew import run_analysis  # noqa: E402
 from llm_config import LLMConfigError  # noqa: E402
 from schemas import RelatorioFinanceiro  # noqa: E402
 from tools.exceptions import FinancialToolError  # noqa: E402
@@ -110,7 +111,7 @@ def _worker_loop() -> None:
                 _set_job(
                     ticker,
                     status="error",
-                    detail="Rate limit da Groq excedido. Tenta novamente daqui a alguns minutos.",
+                    detail=describe_rate_limit_error(exc),
                 )
             else:
                 _set_job(

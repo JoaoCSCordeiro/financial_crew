@@ -7,7 +7,7 @@ como um LLM o poderia devolver, e confirmam que o parse+validacao funciona
 nos casos realistas (incluindo os "maus" que motivaram esta abordagem).
 """
 
-from crew import _extract_json_report
+from crew import _extract_json_report, describe_rate_limit_error
 
 VALID_JSON = """{
   "ativo": "Apple",
@@ -68,3 +68,36 @@ class TestExtractJsonReportFalha:
 
     def test_string_vazia_devolve_none(self):
         assert _extract_json_report("") is None
+
+
+class TestDescribeRateLimitError:
+    def test_distingue_limite_diario(self):
+        exc = Exception(
+            'RateLimitError: GroqException - {"error":{"message":"Rate limit reached '
+            'for model on tokens per day (TPD): Limit 200000"}}'
+        )
+        description = describe_rate_limit_error(exc)
+        assert "DIÁRIO" in description
+        assert "200 000" in description
+
+    def test_distingue_limite_por_minuto(self):
+        exc = Exception(
+            'RateLimitError: GroqException - {"error":{"message":"Rate limit reached '
+            'for model on tokens per minute (TPM): Limit 8000"}}'
+        )
+        description = describe_rate_limit_error(exc)
+        assert "POR MINUTO" in description
+        assert "8000" in description
+
+    def test_fallback_generico_quando_tipo_nao_identificado(self):
+        exc = Exception("rate limit exceeded, no further details")
+        description = describe_rate_limit_error(exc)
+        assert "Rate limit da Groq excedido" in description
+
+    def test_segue_a_cadeia_de_causas(self):
+        cause = Exception("rate limit exceeded: tokens per day (TPD) limit hit")
+        wrapper = Exception("InstructorRetryException: falhou")
+        wrapper.__cause__ = cause
+
+        description = describe_rate_limit_error(wrapper)
+        assert "DIÁRIO" in description

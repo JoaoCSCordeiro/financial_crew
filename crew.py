@@ -62,6 +62,45 @@ def is_rate_limit_error(exc: BaseException) -> bool:
     return False
 
 
+def describe_rate_limit_error(exc: BaseException) -> str:
+    """
+    Devolve uma descrição amigável do erro de rate limit, distinguindo o
+    limite POR MINUTO (TPM, 8000 tokens -- o token bucket em
+    rate_limiter.py já lida bem com isto) do limite DIÁRIO (TPD, 200 000
+    tokens -- nenhuma espera de minutos resolve isto, só o reset diário da
+    Groq). Percorre a mesma cadeia de causas que `is_rate_limit_error`,
+    para conseguir apanhar a mensagem real mesmo quando vem envolvida em
+    várias camadas de exceção (litellm/instructor/crewAI).
+    """
+    seen = set()
+    current = exc
+    raw_message = str(exc)
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        message = str(current)
+        lower = message.lower()
+        if "rate_limit_exceeded" in lower or "rate limit" in lower or "429" in lower:
+            raw_message = message
+        current = current.__cause__
+
+    lower = raw_message.lower()
+    if "tokens per day" in lower or "(tpd)" in lower:
+        prefix = (
+            "Limite DIÁRIO da Groq (200 000 tokens/dia) excedido -- isto não "
+            "se resolve à espera de minutos, só no reset diário (ou trocando "
+            "de chave/conta). "
+        )
+    elif "tokens per minute" in lower or "(tpm)" in lower:
+        prefix = (
+            "Limite POR MINUTO da Groq (8000 tokens/min) excedido mesmo após "
+            "o token bucket e os retries. "
+        )
+    else:
+        prefix = "Rate limit da Groq excedido. "
+
+    return f"{prefix}Detalhe: {raw_message}"
+
+
 def _extract_json_report(raw_text: str) -> RelatorioFinanceiro | None:
     """
     Extrai e valida o RelatorioFinanceiro a partir do texto em bruto devolvido
