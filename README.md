@@ -18,6 +18,9 @@ enforce factual grounding and prevent hallucinated data.
 | —     | Automated tests (pytest)                  | Done      |
 | —     | CI/CD (GitHub Actions)                    | Done      |
 | —     | Observability & metrics                   | Done      |
+| —     | Analysis cache (SQLite + TTL)              | Done      |
+| —     | Token bucket rate limiter                  | Done      |
+| —     | Docker / docker-compose                    | Done      |
 
 ## Architecture
 
@@ -45,25 +48,32 @@ financial_crew/
 ├── requirements-dev.txt
 ├── .gitignore
 ├── .coveragerc
+├── Dockerfile
+├── docker-compose.yml
+├── .dockerignore
 ├── .github/
 │   └── workflows/
 │       └── ci.yml               # GitHub Actions: lint, format check, tests (on push/PR)
 ├── llm_config.py          # LLM configuration and connectivity test (Groq)
 ├── agents.py               # Agent definitions (News Analyst, Technical Analyst, Orchestrator)
 ├── tasks.py                 # Task definitions bound to each agent
-├── crew.py                  # Crew assembly, execution, manual JSON extraction/validation
+├── crew.py                  # Crew assembly, execution, cache lookup, manual JSON extraction
 ├── schemas.py                # Pydantic schema for the final report
-├── metrics.py                 # Observability: duration/token metrics per analysis
-├── main.py                     # Production entrypoint (CLI, batch execution, error isolation)
+├── cache.py                   # SQLite + TTL cache of analysis results
+├── rate_limiter.py             # Token bucket rate limiter for Groq's free tier
+├── metrics.py                   # Observability: duration/token metrics per analysis
+├── main.py                       # Production entrypoint (CLI, batch execution, error isolation)
 ├── frontend/
-│   └── app.py                   # Flask dashboard (triggers analyses, live-updating UI)
+│   └── app.py                     # Flask dashboard (triggers analyses, live-updating UI)
 ├── tests/
 │   ├── conftest.py
 │   ├── test_market_data_tool.py
 │   ├── test_news_tool.py
 │   ├── test_schemas.py
 │   ├── test_crew_json_extraction.py
-│   └── test_metrics.py
+│   ├── test_metrics.py
+│   ├── test_cache.py
+│   └── test_rate_limiter.py
 └── tools/
     ├── __init__.py
     ├── exceptions.py         # Custom exception hierarchy
@@ -338,6 +348,8 @@ Unit tests live in `tests/` and never touch the network or the Groq API —
 - `crew._extract_json_report`: the manual JSON extraction/validation logic
   described above, including the realistic "messy" cases (JSON wrapped in
   prose or markdown fences, malformed JSON, schema violations)
+- `cache.py`: TTL expiry, overwrite behavior, corrupted-entry handling
+- `rate_limiter.py`: token bucket acquire/wait/reconcile behavior
 - `metrics.py`: recording, reading, and summarizing
 
 Install dev dependencies and run:
@@ -358,11 +370,13 @@ out — no real API calls happen in CI.
 
 ## Observability & Metrics
 
-Every call to `crew.run_analysis` — success or failure — is recorded to
-`metrics/metrics.jsonl` (one JSON object per line) via `metrics.py`:
-duration, token usage (`total`/`prompt`/`completion`/`successful_requests`,
-read from CrewAI's `CrewOutput.token_usage`), final status, and the error
-message when applicable.
+Every call to `crew.run_analysis` — success, failure, or cache hit — is
+recorded to `metrics/metrics.jsonl` (one JSON object per line) via
+`metrics.py`: duration, token usage
+(`total`/`prompt`/`completion`/`successful_requests`, read from CrewAI's
+`CrewOutput.token_usage`), final status (`success`, `error`,
+`invalid_schema`, or `cache_hit` — see "Analysis Cache" below), and the
+error message when applicable.
 
 View a summary from the command line:
 
@@ -376,6 +390,107 @@ refreshed after every analysis. This is deliberately simple (a flat JSONL
 file, no external time-series database) — appropriate for a personal/demo
 project, but the schema is structured enough to be loaded into pandas or
 a real metrics backend later if needed.
+
+## Analysis Cache
+
+`cache.py` stores every completed analysis in a small SQLite database
+(`cache/analysis_cache.db`), keyed by ticker, with a TTL (15 minutes by
+default). `crew.run_analysis` checks the cache first and returns
+instantly — skipping the Groq API entirely — if a fresh-enough result
+already exists. This both saves quota (relevant given the tight free-tier
+limits described below) and makes repeat requests for the same asset
+from the frontend near-instant.
+
+SQLite (rather than an in-memory dict) was a deliberate choice: it
+survives process restarts and is shared between `main.py` and
+`frontend/app.py` even though they're separate processes, as long as they
+point at the same `cache/` directory (which they do by default, and which
+`docker-compose.yml` mounts as a shared volume).
+
+Force a fresh analysis, bypassing the cache:
+
+```python
+from crew import run_analysis
+run_analysis(asset_name="Tesla", ticker="TSLA", use_cache=False)
+```
+
+Inspect what's currently cached:
+
+```bash
+python cache.py
+```
+
+## Rate Limiting
+
+`rate_limiter.py` implements a real [token bucket](https://en.wikipedia.org/wiki/Token_bucket)
+for Groq's free-tier budget (8000 tokens/minute), replacing the fixed
+`time.sleep(25)` used in earlier iterations of this project. The
+difference matters: a fixed sleep always pays the same tax regardless of
+actual usage, while a token bucket only waits as long as the budget
+actually requires — often zero, since tokens continuously refill at
+`capacity / refill_period` per second.
+
+Each LLM call reserves an estimated `ESTIMATED_TOKENS_PER_CALL` (1800,
+calibrated from real runs during development) via `acquire()`, which
+blocks only for the deficit, if any. After a full analysis completes, the
+actual token usage reported by Groq (`CrewOutput.token_usage`) is used to
+`reconcile()` the bucket, correcting for estimation drift over many runs.
+The bucket is a process-level singleton, so `main.py`'s batch loop and the
+frontend's background worker share the same budget rather than each
+assuming they have the full 8000 tokens to themselves.
+
+This is a best-effort, in-process rate limiter — it does not (and cannot,
+without an external store like Redis) coordinate across separate OS
+processes running at the same time. The retry-with-backoff safety net in
+`crew.py` (`_kickoff_with_retry`) remains in place for the cases the
+token bucket can't fully prevent (e.g. the daily token limit, which isn't
+modeled by the bucket at all).
+
+## Docker
+
+The project can run entirely in Docker, with no local Python environment
+needed beyond Docker itself.
+
+### 1. Configure the API key
+
+Create a `.env` file in the project root (docker-compose reads it
+automatically):
+
+```
+GROQ_API_KEY=your_real_key_here
+GROQ_MODEL=openai/gpt-oss-120b
+```
+
+### 2. Run the dashboard
+
+```bash
+docker compose up --build
+```
+
+Then open http://localhost:5000. Generated reports, metrics, and the
+analysis cache persist across restarts via the `output/`, `metrics/`, and
+`cache/` volumes mounted into the container.
+
+### 3. Run the batch CLI instead (optional)
+
+The `cli` service shares the same image but doesn't start automatically
+(it's behind the `cli` Docker Compose profile):
+
+```bash
+docker compose run --rm cli
+docker compose run --rm cli python main.py --ticker Bitcoin:BTC-USD
+```
+
+### Troubleshooting
+
+If `pip install` fails during the image build on a dependency that needs
+to compile from source (uncommon on `linux/amd64`, more likely on
+`linux/arm64` if a package has no prebuilt wheel for that platform), add
+build tools to the `Dockerfile` before the `pip install` step:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && rm -rf /var/lib/apt/lists/*
+```
 
 ## Roadmap
 

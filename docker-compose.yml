@@ -1,0 +1,30 @@
+services:
+  frontend:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      FLASK_DEBUG: ${FLASK_DEBUG:-0}
+    volumes:
+      - ./output:/app/output
+      - ./metrics:/app/metrics
+      - ./cache:/app/cache
+    restart: unless-stopped
+
+  # Servico opcional para correr a analise batch (main.py) em vez do dashboard.
+  # Nao arranca com `docker compose up` por defeito -- corre explicitamente com:
+  #   docker compose run --rm cli
+  #   docker compose run --rm cli python main.py --ticker Bitcoin:BTC-USD
+  cli:
+    build: .
+    profiles: ["cli"]
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+    volumes:
+      - ./output:/app/output
+      - ./metrics:/app/metrics
+      - ./cache:/app/cache
+    command: ["python", "main.py"]

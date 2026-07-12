@@ -42,6 +42,9 @@ output/
 # Metricas geradas (metrics.py)
 metrics/
 
+# Cache de analises (cache.py)
+cache/
+
 # Testes / cobertura
 .pytest_cache/
 .coverage

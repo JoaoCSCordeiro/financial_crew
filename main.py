@@ -15,7 +15,6 @@ import argparse
 import json
 import logging
 import sys
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,11 +29,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Pausa entre ativos, para respeitar o rate limit do tier gratuito da Groq
-# (8000 tokens/minuto). Cada analise completa (3 chamadas ao LLM + validacao
-# Pydantic via instructor) pode consumir 2000-3000 tokens, por isso corremos
-# no maximo ~2-3 ativos por minuto sem esbarrar no limite.
-SECONDS_BETWEEN_ASSETS = 30
+# Nota: a pausa entre ativos deixou de ser um `time.sleep` fixo aqui -- o
+# rate limit da Groq (8000 tokens/minuto) e agora gerido de forma adaptativa
+# pelo token bucket em rate_limiter.py, chamado internamente por
+# crew.run_analysis. Ver README, "Rate limiting" para detalhes.
 
 # Ativos suportados por default. Reduzido a 2 para caber confortavelmente no
 # free tier da Groq (8000 TPM / 200000 TPD) sem esgotar a quota diaria a meio
@@ -146,16 +144,9 @@ def main(assets: dict[str, str]) -> int:
         Codigo de saida do processo: 0 se todos os ativos tiveram sucesso,
         1 se pelo menos um falhou (util para deteccao em pipelines CI/CD).
     """
-    summaries = []
-    for i, (asset_name, ticker) in enumerate(assets.items()):
-        summaries.append(analyze_one(asset_name, ticker))
-        is_last = i == len(assets) - 1
-        if not is_last:
-            logger.info(
-                "A aguardar %ds antes do proximo ativo (rate limit da Groq free tier)...",
-                SECONDS_BETWEEN_ASSETS,
-            )
-            time.sleep(SECONDS_BETWEEN_ASSETS)
+    summaries = [
+        analyze_one(asset_name, ticker) for asset_name, ticker in assets.items()
+    ]
 
     print("\n" + "=" * 60)
     print("RESUMO DA EXECUCAO")

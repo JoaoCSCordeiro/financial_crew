@@ -22,7 +22,13 @@ from agents import (
     build_orchestrator_agent,
     build_technical_analyst_agent,
 )
+from cache import DEFAULT_TTL_SECONDS, get_cached_report, set_cached_report
 from metrics import record_analysis
+from rate_limiter import (
+    ESTIMATED_TOKENS_PER_ANALYSIS,
+    ESTIMATED_TOKENS_PER_CALL,
+    groq_rate_limiter,
+)
 from schemas import RelatorioFinanceiro
 from tasks import build_news_task, build_technical_task, build_validation_task
 
@@ -137,7 +143,13 @@ def _kickoff_with_retry(crew: Crew, inputs: dict):
     return crew.kickoff(inputs=inputs)
 
 
-def run_analysis(asset_name: str, ticker: str, stage_callback=None):
+def run_analysis(
+    asset_name: str,
+    ticker: str,
+    stage_callback=None,
+    use_cache: bool = True,
+    cache_ttl_seconds: int = DEFAULT_TTL_SECONDS,
+):
     """
     Executa a analise completa para um ativo especifico.
 
@@ -147,14 +159,20 @@ def run_analysis(asset_name: str, ticker: str, stage_callback=None):
         stage_callback: funcao opcional `(stage: str) -> None` chamada em
             cada transicao de fase do pipeline: "noticias" (inicio),
             "tecnico", "orquestrador", "concluido". Ver `build_crew`.
+        use_cache: se True (default), verifica primeiro a cache SQLite
+            (ver cache.py) e devolve o resultado em cache sem chamar a
+            Groq se ainda estiver dentro do TTL. Usa `use_cache=False`
+            para forcar uma analise fresca.
+        cache_ttl_seconds: por quanto tempo um resultado em cache e
+            considerado valido antes de ser re-analisado.
 
     Returns:
         Uma instancia de `schemas.RelatorioFinanceiro` se conseguirmos
         extrair e validar JSON valido a partir do output do Orquestrador
-        (caminho esperado). Se isso falhar (ex: o LLM devolveu algo
-        irrecuperavel), devolve o texto em bruto (str) para nao perder o
-        resultado -- quem chama esta funcao deve verificar o tipo devolvido
-        (ver main.py para o padrao recomendado).
+        (ou se veio da cache). Se a extracao falhar (ex: o LLM devolveu
+        algo irrecuperavel), devolve o texto em bruto (str) para nao
+        perder o resultado -- quem chama esta funcao deve verificar o
+        tipo devolvido (ver main.py para o padrao recomendado).
 
     Raises:
         Exception: se o rate limit da Groq persistir mesmo apos os retries
@@ -163,8 +181,32 @@ def run_analysis(asset_name: str, ticker: str, stage_callback=None):
             funcao deve verificar a mensagem em vez de um tipo especifico
             (ver `is_rate_limit_error` para o mesmo criterio usado aqui).
     """
+    if use_cache:
+        cached = get_cached_report(ticker, ttl_seconds=cache_ttl_seconds)
+        if cached is not None:
+            logger.info(
+                "Cache hit para %s (%s) -- a saltar a chamada à Groq.",
+                asset_name,
+                ticker,
+            )
+            if stage_callback is not None:
+                stage_callback("concluido")
+            record_analysis(asset_name, ticker, 0.0, status="cache_hit", tokens=None)
+            return cached
+
     if stage_callback is not None:
         stage_callback("noticias")
+
+    # Reserva orcamento no token bucket para a primeira chamada ao LLM
+    # (as chamadas seguintes sao geridas pelos callbacks das tasks -- ver
+    # tasks.py). Substitui o antigo `time.sleep` fixo entre analises.
+    waited = groq_rate_limiter.acquire(ESTIMATED_TOKENS_PER_CALL)
+    if waited > 0:
+        logger.info(
+            "Rate limiter: à espera de %.1fs antes de iniciar a análise de %s (orçamento Groq).",
+            waited,
+            asset_name,
+        )
 
     start_time = time.monotonic()
     crew = build_crew(stage_callback=stage_callback)
@@ -199,10 +241,17 @@ def run_analysis(asset_name: str, ticker: str, stage_callback=None):
             "completion": getattr(usage, "completion_tokens", None),
             "successful_requests": getattr(usage, "successful_requests", None),
         }
+        # Corrige o token bucket com o consumo REAL desta analise (3
+        # chamadas ao LLM), para nao ir derivando da realidade ao longo de
+        # muitas execucoes -- ver rate_limiter.TokenBucket.reconcile.
+        if tokens["total"] is not None:
+            groq_rate_limiter.reconcile(tokens["total"], ESTIMATED_TOKENS_PER_ANALYSIS)
 
     report = _extract_json_report(crew_output.raw)
     if report is not None:
         record_analysis(asset_name, ticker, duration, status="success", tokens=tokens)
+        if use_cache:
+            set_cached_report(ticker, asset_name, report)
         return report
 
     logger.warning(

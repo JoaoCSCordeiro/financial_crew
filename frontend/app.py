@@ -13,6 +13,7 @@ Uso:
 
 import json
 import queue
+import os
 import sys
 import threading
 from datetime import datetime, timezone
@@ -1122,4 +1123,9 @@ if __name__ == "__main__":
     # use_reloader=False: o reloader do Flask reimporta o modulo num processo
     # filho, o que duplicaria a worker thread e o loop de analise. Como o
     # dashboard nao precisa de live-reload de codigo para ser util, desligamos.
-    app.run(debug=True, port=5000, use_reloader=False)
+    # host="0.0.0.0": necessário para o servidor ser acessível de fora do
+    # contentor Docker (o default do Flask, 127.0.0.1, só aceita ligações
+    # da própria máquina). FLASK_DEBUG=0 no .env/docker-compose desliga o
+    # modo debug em produção.
+    debug_mode = os.getenv("FLASK_DEBUG", "1") == "1"
+    app.run(host="0.0.0.0", port=5000, debug=debug_mode, use_reloader=False)

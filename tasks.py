@@ -11,32 +11,37 @@ nao e apenas documentacao, e parte do prompt que o LLM recebe, e ajuda a
 reduzir divergencia de formato entre execucoes.
 """
 
-import time
+import logging
 
 from crewai import Agent, Task
 
-# Pausa entre tarefas do MESMO ativo, para respeitar o rate limit gratuito
-# da Groq (8000 tokens/minuto no modelo openai/gpt-oss-120b). Uma analise
-# completa faz 4 chamadas ao LLM (noticias, tecnico, orquestrador + a
-# chamada extra do 'instructor' para validar o schema) muito seguidas --
-# isso sozinho pode esgotar o limite antes mesmo de passarmos para o
-# proximo ativo. Espacar as tarefas dentro do mesmo ativo da tempo ao
-# limite (janela rolante por minuto) para libertar capacidade.
-SECONDS_BETWEEN_TASKS = 25
+from rate_limiter import ESTIMATED_TOKENS_PER_CALL, groq_rate_limiter
+
+logger = logging.getLogger(__name__)
 
 
 def _make_task_callback(on_stage_change=None, next_stage: str | None = None):
     """
-    Constroi o callback executado quando uma tarefa termina: espaca a
-    proxima chamada ao LLM (rate limit da Groq) e, opcionalmente, avisa
-    quem estiver a ouvir (ex: o frontend) de que a analise avancou para a
-    proxima fase do pipeline.
+    Constroi o callback executado quando uma tarefa termina: reserva
+    orçamento no token bucket antes da próxima chamada ao LLM (rate limit
+    da Groq) e, opcionalmente, avisa quem estiver a ouvir (ex: o frontend)
+    de que a análise avançou para a próxima fase do pipeline.
+
+    Antes usávamos um `time.sleep(25)` fixo aqui. Um token bucket é
+    estritamente melhor: se ainda há orçamento disponível, a próxima
+    chamada arranca de imediato (zero espera); só espera o tempo exato
+    necessário quando o orçamento está mesmo apertado.
     """
 
     def _callback(task_output) -> None:
         if on_stage_change is not None and next_stage is not None:
             on_stage_change(next_stage)
-        time.sleep(SECONDS_BETWEEN_TASKS)
+        waited = groq_rate_limiter.acquire(ESTIMATED_TOKENS_PER_CALL)
+        if waited > 0:
+            logger.info(
+                "Rate limiter: à espera de %.1fs antes da próxima chamada ao LLM (orçamento Groq).",
+                waited,
+            )
 
     return _callback
 
