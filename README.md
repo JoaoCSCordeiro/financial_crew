@@ -237,10 +237,12 @@ only so modules that check for its presence at import time don't error out.
 - Possible extensions beyond current scope: WebSocket-based live updates
   instead of polling, persistence to a database instead of flat JSON files,
   and a scheduled/cron execution mode for periodic reports.
-- `litellm` (an unpinned dependency of `crewai`) has, as of recent
-  releases, started requiring Python 3.11+ (`typing.NotRequired`). If your
-  local virtualenv was created with Python 3.10, real LLM calls will fail
-  with an `ImportError` even though the package installs cleanly — this
-  doesn't affect CI (Python 3.11/3.12) or any mocked test, only a real
-  `.venv` built on 3.10. Recreate the virtualenv with Python 3.11+ if you
-  hit this.
+- `litellm` releases `1.97.0`+ use `typing.NotRequired` in some internal
+  modules, available only from Python 3.11 — on Python 3.10 (the minimum
+  this project declares) `1.98.0`+ fails to import at all, and `1.97.0`
+  imports but breaks mid-call with a `PydanticUserError` (`Message is not
+  fully defined`). `requirements.txt` now caps `litellm<1.97.0` (`1.96.0`
+  confirmed working, both import and a real Groq call, in this session)
+  to keep Python 3.10 working; no effect on 3.11+ installs (CI's matrix).
+  If you already have `venv/` installed, re-run `pip install -r
+  requirements.txt` to pick up the cap.

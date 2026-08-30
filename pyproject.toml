@@ -1,0 +1,13 @@
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# Seleção explícita, em vez de confiar no "default" do ruff: o
+# requirements-dev.txt não fixa a versão do ruff (`ruff>=0.6.0`), e o
+# conjunto de regras ativas por omissão já cresceu desde então (passou a
+# incluir UP/BLE/I/RUF, entre outras) -- sem esta seleção explícita, uma
+# instalação nova do ruff começa a falhar em código que nunca foi escrito
+# a pensar nessas regras, sem nenhuma mudança de código correspondente.
+# E4/E7/E9/F é o conjunto clássico (pycodestyle "erro" + Pyflakes) contra
+# o qual todo o código deste projeto já foi validado.
+select = ["E4", "E7", "E9", "F"]
