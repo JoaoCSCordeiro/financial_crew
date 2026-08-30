@@ -23,3 +23,6 @@ pydantic>=2.11.9,<2.13  # limite superior por compatibilidade com crewai-core
 # --- Utilitários ---
 python-dotenv>=1.0.1
 tenacity>=9.0.0
+requests>=2.31.0  # cliente HTTP do News Analyst para o serviço de sentimento
+                  # fine-tuned opcional (SENTIMENT_PROVIDER=finetuned) -- ver
+                  # tools/sentiment_tool.py e finetuning/README.md

@@ -22,3 +22,11 @@ class MarketDataUnavailableError(FinancialToolError):
 
 class NewsSearchError(FinancialToolError):
     """Lançado quando a pesquisa de notícias (DuckDuckGo) falha ou é limitada (rate limit)."""
+
+
+class SentimentServiceError(FinancialToolError):
+    """
+    Lançado quando o serviço de classificação de sentimento fine-tuned
+    (finetuning/serving/app.py) está inacessível ou devolve um erro --
+    usado só quando SENTIMENT_PROVIDER=finetuned (ver tools/sentiment_tool.py).
+    """

@@ -59,7 +59,9 @@ financial_crew/
 ├── main.py                       # Production entrypoint (CLI, batch execution, error isolation)
 ├── frontend/app.py                # Flask dashboard (triggers analyses, live-updating UI)
 ├── tests/                          # pytest suite, network and LLM mocked
-└── tools/                           # yfinance / ddgs business logic + CrewAI tool adapters
+├── tools/                           # yfinance / ddgs business logic + CrewAI tool adapters
+├── finetuning/                       # optional: LoRA fine-tuned sentiment classifier (see below)
+└── docs/AZURE-DEPLOYMENT.md            # documented (not executed) Azure Container Apps deployment
 ```
 
 ## Setup
@@ -138,6 +140,35 @@ result = run_analysis(asset_name="Tesla", ticker="TSLA")
 result = run_analysis(asset_name="Tesla", ticker="TSLA", use_cache=False)
 ```
 
+### Optional: fine-tuned sentiment classifier
+
+`finetuning/` is a self-contained, optional module: it trains a sentiment
+classifier (LoRA over `distilbert-base-uncased`) as an alternative to the
+News Analyst's default LLM-based classification, tracks experiments with
+MLflow, and serves the result via a separate FastAPI + Docker service. It
+adds no dependency to the main crew unless you opt in.
+
+```bash
+# 1. train (separate deps, see finetuning/README.md)
+pip install -r finetuning/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126
+python -m finetuning.run_experiments
+python -m finetuning.compare --n-per-class 20   # measured comparison vs. the LLM path
+
+# 2. serve (own Dockerfile, own requirements.txt -- see finetuning/README.md)
+docker build -f finetuning/serving/Dockerfile -t financial-crew-sentiment .
+docker run -p 8001:8001 financial-crew-sentiment
+
+# 3. opt the News Analyst into it
+SENTIMENT_PROVIDER=finetuned python main.py --ticker Apple:AAPL
+```
+
+`SENTIMENT_PROVIDER` (default: `llm`, i.e. unchanged original behavior)
+and `SENTIMENT_SERVICE_URL` (default: `http://localhost:8001`) are the
+only two things this integration touches in the main crew. See
+`finetuning/README.md` for full usage, `finetuning/RESULTS.md` for
+measured accuracy/latency/cost numbers, and `docs/AZURE-DEPLOYMENT.md`
+for a documented (not executed) cloud deployment path.
+
 ### Tests, metrics, cache
 
 ```bash
@@ -166,6 +197,9 @@ only so modules that check for its presence at import time don't error out.
 - ruff, black — lint and format check
 - GitHub Actions — CI
 - Docker, Docker Compose
+- (optional, `finetuning/`) PyTorch, Hugging Face `transformers`/`peft`/`datasets`,
+  MLflow, FastAPI — LoRA fine-tuning, experiment tracking, and serving of an
+  alternative sentiment classifier; see `finetuning/README.md`
 
 ## Limitations
 
@@ -203,3 +237,10 @@ only so modules that check for its presence at import time don't error out.
 - Possible extensions beyond current scope: WebSocket-based live updates
   instead of polling, persistence to a database instead of flat JSON files,
   and a scheduled/cron execution mode for periodic reports.
+- `litellm` (an unpinned dependency of `crewai`) has, as of recent
+  releases, started requiring Python 3.11+ (`typing.NotRequired`). If your
+  local virtualenv was created with Python 3.10, real LLM calls will fail
+  with an `ImportError` even though the package installs cleanly — this
+  doesn't affect CI (Python 3.11/3.12) or any mocked test, only a real
+  `.venv` built on 3.10. Recreate the virtualenv with Python 3.11+ if you
+  hit this.
