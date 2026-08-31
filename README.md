@@ -107,6 +107,8 @@ docker compose run --rm cli python main.py --ticker Bitcoin:BTC-USD
 
 ### Dashboard
 
+![Financial Crew dashboard — dossiê de análise com três agentes e um veredito](docs/screenshots/dashboard.png)
+
 ```bash
 python frontend/app.py
 ```
