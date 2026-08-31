@@ -51,3 +51,13 @@ cache/
 coverage.xml
 htmlcov/
 .ruff_cache/
+
+# Fine-tuning: artefactos de treino (regeneráveis via
+# `python -m finetuning.run_experiments`) e cache do Hugging Face Hub.
+finetuning/mlruns/
+finetuning/models/
+huggingface_hub_cache/
+
+# Notas de decisões técnicas para preparação de entrevista -- não faz
+# parte da funcionalidade do projeto (ver DECISOES-FINETUNING.md).
+DECISOES-FINETUNING.md

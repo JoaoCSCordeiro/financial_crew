@@ -59,7 +59,9 @@ financial_crew/
 ├── main.py                       # Production entrypoint (CLI, batch execution, error isolation)
 ├── frontend/app.py                # Flask dashboard (triggers analyses, live-updating UI)
 ├── tests/                          # pytest suite, network and LLM mocked
-└── tools/                           # yfinance / ddgs business logic + CrewAI tool adapters
+├── tools/                           # yfinance / ddgs business logic + CrewAI tool adapters
+├── finetuning/                       # optional: LoRA fine-tuned sentiment classifier (see below)
+└── docs/AZURE-DEPLOYMENT.md            # documented (not executed) Azure Container Apps deployment
 ```
 
 ## Setup
@@ -105,6 +107,8 @@ docker compose run --rm cli python main.py --ticker Bitcoin:BTC-USD
 
 ### Dashboard
 
+![Financial Crew dashboard — dossiê de análise com três agentes e um veredito](docs/screenshots/dashboard.png)
+
 ```bash
 python frontend/app.py
 ```
@@ -138,6 +142,35 @@ result = run_analysis(asset_name="Tesla", ticker="TSLA")
 result = run_analysis(asset_name="Tesla", ticker="TSLA", use_cache=False)
 ```
 
+### Optional: fine-tuned sentiment classifier
+
+`finetuning/` is a self-contained, optional module: it trains a sentiment
+classifier (LoRA over `distilbert-base-uncased`) as an alternative to the
+News Analyst's default LLM-based classification, tracks experiments with
+MLflow, and serves the result via a separate FastAPI + Docker service. It
+adds no dependency to the main crew unless you opt in.
+
+```bash
+# 1. train (separate deps, see finetuning/README.md)
+pip install -r finetuning/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126
+python -m finetuning.run_experiments
+python -m finetuning.compare --n-per-class 20   # measured comparison vs. the LLM path
+
+# 2. serve (own Dockerfile, own requirements.txt -- see finetuning/README.md)
+docker build -f finetuning/serving/Dockerfile -t financial-crew-sentiment .
+docker run -p 8001:8001 financial-crew-sentiment
+
+# 3. opt the News Analyst into it
+SENTIMENT_PROVIDER=finetuned python main.py --ticker Apple:AAPL
+```
+
+`SENTIMENT_PROVIDER` (default: `llm`, i.e. unchanged original behavior)
+and `SENTIMENT_SERVICE_URL` (default: `http://localhost:8001`) are the
+only two things this integration touches in the main crew. See
+`finetuning/README.md` for full usage, `finetuning/RESULTS.md` for
+measured accuracy/latency/cost numbers, and `docs/AZURE-DEPLOYMENT.md`
+for a documented (not executed) cloud deployment path.
+
 ### Tests, metrics, cache
 
 ```bash
@@ -166,6 +199,9 @@ only so modules that check for its presence at import time don't error out.
 - ruff, black — lint and format check
 - GitHub Actions — CI
 - Docker, Docker Compose
+- (optional, `finetuning/`) PyTorch, Hugging Face `transformers`/`peft`/`datasets`,
+  MLflow, FastAPI — LoRA fine-tuning, experiment tracking, and serving of an
+  alternative sentiment classifier; see `finetuning/README.md`
 
 ## Limitations
 
@@ -203,3 +239,12 @@ only so modules that check for its presence at import time don't error out.
 - Possible extensions beyond current scope: WebSocket-based live updates
   instead of polling, persistence to a database instead of flat JSON files,
   and a scheduled/cron execution mode for periodic reports.
+- `litellm` releases `1.97.0`+ use `typing.NotRequired` in some internal
+  modules, available only from Python 3.11 — on Python 3.10 (the minimum
+  this project declares) `1.98.0`+ fails to import at all, and `1.97.0`
+  imports but breaks mid-call with a `PydanticUserError` (`Message is not
+  fully defined`). `requirements.txt` now caps `litellm<1.97.0` (`1.96.0`
+  confirmed working, both import and a real Groq call, in this session)
+  to keep Python 3.10 working; no effect on 3.11+ installs (CI's matrix).
+  If you already have `venv/` installed, re-run `pip install -r
+  requirements.txt` to pick up the cap.

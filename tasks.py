@@ -12,12 +12,49 @@ reduzir divergencia de formato entre execucoes.
 """
 
 import logging
+import os
 
 from crewai import Agent, Task
 
 from rate_limiter import ESTIMATED_TOKENS_PER_CALL, groq_rate_limiter
 
 logger = logging.getLogger(__name__)
+
+_NEWS_TASK_DESCRIPTION_LLM = (
+    "Usa a ferramenta 'obter_noticias_recentes' com max_results=5 para "
+    "pesquisar noticias sobre '{asset_name}'. Classifica CADA um dos "
+    "titulos devolvidos individualmente como positivo, negativo ou "
+    "neutro para o preco/perspetivas do ativo, e so depois conta os "
+    "resultados para decidir o sentimento geral. Regra de decisao "
+    "obrigatoria (aplica-a literalmente, nao uses a tua impressao "
+    "geral): sejam P = numero de titulos positivos e N = numero de "
+    "titulos negativos (ignora os neutros nesta conta):\n"
+    "- Se P > N: sentimento geral = 'positivo'\n"
+    "- Se N > P: sentimento geral = 'negativo'\n"
+    "- Se P == N e ambos >= 1: sentimento geral = 'misto'\n"
+    "- Se P == N == 0 (todos neutros): sentimento geral = 'neutro'\n"
+    "NAO uses 'misto' como resposta por defeito quando estiveres "
+    "inseguro -- e um resultado especifico que so se aplica quando "
+    "P e N sao realmente iguais e ambos maiores que zero. Mostra a "
+    "tua contagem (quantos titulos positivos, negativos, neutros) "
+    "antes da conclusao final, para que seja possivel auditar a "
+    "decisao. Se a ferramenta devolver um erro ou zero noticias, "
+    "reporta isso explicitamente em vez de inventar contexto."
+)
+
+_NEWS_TASK_DESCRIPTION_FINETUNED = (
+    "Usa a ferramenta 'obter_noticias_recentes' com max_results=5 para "
+    "pesquisar noticias sobre '{asset_name}'. De seguida, passa a lista "
+    "completa dos titulos devolvidos (exatamente como vieram da ferramenta, "
+    "sem reescrever) para a ferramenta 'classificar_sentimento_titulos'. "
+    "NAO classifiques os titulos tu proprio -- essa ferramenta usa um "
+    "modelo especializado e ja devolve a classificacao individual de cada "
+    "titulo, a contagem (positivos/negativos/neutros) e o sentimento geral "
+    "resultante da regra de decisao. Usa esses valores diretamente no teu "
+    "output, sem os reinterpretar ou corrigir. Se 'classificar_sentimento_titulos' "
+    "devolver um erro (ex: servico indisponivel), reporta isso explicitamente "
+    "-- nao tentes classificar os titulos tu proprio como substituto."
+)
 
 
 def _make_task_callback(on_stage_change=None, next_stage: str | None = None):
@@ -46,30 +83,23 @@ def _make_task_callback(on_stage_change=None, next_stage: str | None = None):
     return _callback
 
 
+def _select_news_task_description() -> str:
+    """
+    Extraído para função própria (testável sem construir Agent/Task reais
+    -- ver tests/test_sentiment_provider.py). Por default ('llm',
+    comportamento original) o proprio LLM classifica cada titulo; com
+    'finetuned', delega a classificacao para 'classificar_sentimento_titulos'
+    (ver tools/sentiment_tool.py) e usa o resultado diretamente.
+    """
+    if os.getenv("SENTIMENT_PROVIDER", "llm").strip().lower() == "finetuned":
+        return _NEWS_TASK_DESCRIPTION_FINETUNED
+    return _NEWS_TASK_DESCRIPTION_LLM
+
+
 def build_news_task(agent: Agent, on_stage_change=None) -> Task:
     """Tarefa do Agente 1: recolher e resumir noticias recentes do ativo."""
     return Task(
-        description=(
-            "Usa a ferramenta 'obter_noticias_recentes' com max_results=5 para "
-            "pesquisar noticias sobre '{asset_name}'. Classifica CADA um dos "
-            "titulos devolvidos individualmente como positivo, negativo ou "
-            "neutro para o preco/perspetivas do ativo, e so depois conta os "
-            "resultados para decidir o sentimento geral. Regra de decisao "
-            "obrigatoria (aplica-a literalmente, nao uses a tua impressao "
-            "geral): sejam P = numero de titulos positivos e N = numero de "
-            "titulos negativos (ignora os neutros nesta conta):\n"
-            "- Se P > N: sentimento geral = 'positivo'\n"
-            "- Se N > P: sentimento geral = 'negativo'\n"
-            "- Se P == N e ambos >= 1: sentimento geral = 'misto'\n"
-            "- Se P == N == 0 (todos neutros): sentimento geral = 'neutro'\n"
-            "NAO uses 'misto' como resposta por defeito quando estiveres "
-            "inseguro -- e um resultado especifico que so se aplica quando "
-            "P e N sao realmente iguais e ambos maiores que zero. Mostra a "
-            "tua contagem (quantos titulos positivos, negativos, neutros) "
-            "antes da conclusao final, para que seja possivel auditar a "
-            "decisao. Se a ferramenta devolver um erro ou zero noticias, "
-            "reporta isso explicitamente em vez de inventar contexto."
-        ),
+        description=_select_news_task_description(),
         expected_output=(
             "Um resumo estruturado em texto contendo: (1) a classificacao "
             "individual de cada titulo (positivo/negativo/neutro) com uma "

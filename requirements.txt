@@ -6,9 +6,18 @@ fastapi>=0.115.0
 
 # --- LLM Engine (Custo Zero) ---
 # crewai.LLM (baseado em litellm) trata da ligação a Groq e Ollama nativamente.
-# Não fixamos versão exata -- deixamos o pip resolver a versão compatível
-# com a versão do crewai instalada, para evitar conflitos de dependências.
-litellm
+# litellm>=1.97.0 usa `typing.NotRequired` nalguns módulos internos (ex:
+# litellm/llms/anthropic/experimental_pass_through/context_management/),
+# disponível só a partir do Python 3.11 -- em Python 3.10 (o mínimo que
+# este projeto declara suportar) isto quebra de duas formas: 1.98.0+
+# nem sequer importa (ImportError direto); 1.97.0 importa mas falha a
+# meio de uma chamada real ao LLM (`Message is not fully defined`,
+# PydanticUserError, por um forward-ref que fica por resolver). Testado
+# nesta sessão: 1.96.0 é a versão mais recente confirmada a funcionar
+# (import E chamada real à Groq) em Python 3.10. Sem limite superior,
+# quem tiver Python 3.11+ não é afetado -- este cap só existe para não
+# partir em 3.10.
+litellm<1.97.0
 
 # --- Frontend (dashboard) ---
 flask>=3.0.0
@@ -23,3 +32,6 @@ pydantic>=2.11.9,<2.13  # limite superior por compatibilidade com crewai-core
 # --- Utilitários ---
 python-dotenv>=1.0.1
 tenacity>=9.0.0
+requests>=2.31.0  # cliente HTTP do News Analyst para o serviço de sentimento
+                  # fine-tuned opcional (SENTIMENT_PROVIDER=finetuned) -- ver
+                  # tools/sentiment_tool.py e finetuning/README.md

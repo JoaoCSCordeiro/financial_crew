@@ -10,10 +10,35 @@ até uma chamada de ferramenta. Isto é o que separa este sistema de um
 "prompt bonito" — o Agente 3 tem autoridade de veto, não é decorativo.
 """
 
+import os
+
 from crewai import Agent
 
 from llm_config import get_llm
-from tools.crew_tools import MarketDataTool, NewsSearchTool
+from tools.crew_tools import FineTunedSentimentTool, MarketDataTool, NewsSearchTool
+
+
+def _sentiment_provider() -> str:
+    """
+    Lê SENTIMENT_PROVIDER (default: 'llm', o comportamento original do
+    projeto -- ver README/DECISOES-FINETUNING.md). 'finetuned' dá ao
+    Agente 1 acesso ao classificador local (finetuning/serving/app.py) em
+    vez de depender só do julgamento do LLM.
+    """
+    return os.getenv("SENTIMENT_PROVIDER", "llm").strip().lower()
+
+
+def _news_analyst_tools() -> list:
+    """
+    Lista de tools do Agente 1, dependente de SENTIMENT_PROVIDER. Extraído
+    para função própria (em vez de inline em `build_news_analyst_agent`)
+    para ser testável sem construir um `Agent`/`LLM` real -- ver
+    tests/test_sentiment_provider.py.
+    """
+    tools = [NewsSearchTool()]
+    if _sentiment_provider() == "finetuned":
+        tools.append(FineTunedSentimentTool())
+    return tools
 
 
 def build_news_analyst_agent() -> Agent:
@@ -23,6 +48,12 @@ def build_news_analyst_agent() -> Agent:
     Responsabilidade única: pesquisar e resumir notícias recentes sobre um
     ativo. Não tem acesso a dados de preço (isso é do Agente 2) e é
     explicitamente proibido de inventar notícias ou fontes.
+
+    Se SENTIMENT_PROVIDER=finetuned, o agente ganha acesso adicional a
+    'classificar_sentimento_titulos' (o modelo LoRA de finetuning/, servido
+    via HTTP -- ver tools/sentiment_tool.py) e a task (ver tasks.py) instrui-o
+    a usar essa ferramenta em vez do seu próprio julgamento. Sem essa
+    variável definida, o comportamento é exatamente o original do projeto.
     """
     return Agent(
         role="Analista de Notícias de Mercado",
@@ -50,7 +81,7 @@ def build_news_analyst_agent() -> Agent:
             "positivos e negativos antes de decidires, e só chegas a 'misto' "
             "quando essa contagem realmente empatar."
         ),
-        tools=[NewsSearchTool()],
+        tools=_news_analyst_tools(),
         llm=get_llm(temperature=0.2),
         verbose=True,
         allow_delegation=False,

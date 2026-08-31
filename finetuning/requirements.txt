@@ -1,0 +1,28 @@
+# Dependências do módulo de fine-tuning (treino + tracking + comparação).
+#
+# Deliberadamente separado do requirements.txt raiz -- ver
+# DECISOES-FINETUNING.md. Quem só quer correr o Financial Crew original
+# não precisa de nenhuma destas dependências (~2.5GB com CUDA).
+#
+# torch precisa do índice extra da PyTorch para a build com CUDA:
+#   pip install -r finetuning/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126
+# (testado com CUDA 12.6; ajusta o índice à tua versão de driver se necessário --
+# ver https://pytorch.org/get-started/locally/. Sem GPU, tira o --extra-index-url:
+# o pip instala a build CPU-only da mesma forma.)
+
+torch>=2.13.0
+transformers>=5.16.0
+peft>=0.20.0
+accelerate>=1.14.0
+datasets>=5.0.0
+
+# --- Tracking de experiências ---
+mlflow>=3.15.0
+
+# --- Métricas de avaliação ---
+scikit-learn>=1.7.0
+
+# --- Comparação com o LLM genérico (chamadas diretas à API REST da Groq) ---
+requests>=2.31.0
+python-dotenv>=1.0.1
+tenacity>=9.0.0

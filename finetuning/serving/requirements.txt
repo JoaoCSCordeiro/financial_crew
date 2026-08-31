@@ -1,0 +1,16 @@
+# Dependências do serviço FastAPI de serving (finetuning/serving/app.py).
+#
+# torch CPU-only de propósito (não CUDA): o serving corre em Azure Container
+# Apps / qualquer host sem GPU -- o modelo é pequeno (distilbert + adapter
+# LoRA de ~4MB) e a latência medida em CPU já é adequada para servir (ver
+# finetuning/RESULTS.md). Usar a build CUDA aqui só inflaria a imagem em
+# ~2GB sem benefício.
+
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.13.0
+
+transformers>=5.16.0
+peft>=0.20.0
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0

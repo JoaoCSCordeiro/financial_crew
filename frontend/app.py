@@ -223,503 +223,478 @@ def index():
     return render_template_string(DASHBOARD_HTML)
 
 
+# ---------------------------------------------------------------------------
+# Dashboard -- direção visual "Dossiê de Caso": cada ativo é um processo com
+# dois agentes-testemunha (notícias, técnico) e um veredito carimbado pelo
+# Orquestrador. Ver DECISOES-FINETUNING.md / histórico da conversa para o
+# raciocínio de design -- não é decoração, mapeia a arquitetura real do
+# sistema (veto do Agente 3 sobre dados sem proveniência).
+# ---------------------------------------------------------------------------
 DASHBOARD_HTML = r"""
 <!DOCTYPE html>
 <html lang="pt-PT">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Financial Crew — Painel de Análise</title>
+<title>Financial Crew — Dossiê de Análise</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Special+Elite&family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0A0E12;
-    --surface: #121821;
-    --surface-hover: #171F2B;
-    --border: #22303F;
-    --text: #E8EDF2;
-    --text-muted: #6B7785;
-    --positive: #34D399;
-    --negative: #F87171;
-    --mixed: #FBBF24;
-    --brand: #5EEAD4;
-    --font-display: 'Space Grotesk', sans-serif;
-    --font-mono: 'JetBrains Mono', monospace;
+    --desk: #1B1712;
+    --desk-line: rgba(239, 230, 204, 0.10);
+    --desk-ink: #EFE6CC;
+    --desk-ink-muted: rgba(239, 230, 204, 0.5);
+    --paper: #EFE6CC;
+    --paper-edge: #DBCDA2;
+    --ink: #241F16;
+    --ink-faded: #8A7C5C;
+    --stamp-green: #35563A;
+    --stamp-red: #A1301F;
+    --font-display: 'Special Elite', 'Courier New', monospace;
+    --font-mono: 'IBM Plex Mono', monospace;
+    --font-sans: 'Inter', -apple-system, 'Segoe UI', sans-serif;
   }
 
   * { box-sizing: border-box; }
 
   body {
     margin: 0;
-    background: var(--bg);
+    background: var(--desk);
     background-image:
-      radial-gradient(circle at 15% 0%, rgba(94, 234, 212, 0.06), transparent 40%),
-      radial-gradient(circle at 85% 100%, rgba(52, 211, 153, 0.05), transparent 40%);
-    color: var(--text);
-    font-family: var(--font-display);
+      repeating-linear-gradient(180deg, rgba(0,0,0,0) 0, rgba(0,0,0,0) 39px, var(--desk-line) 40px),
+      radial-gradient(ellipse at 50% -10%, rgba(239,230,204,0.05), transparent 55%);
+    color: var(--desk-ink);
+    font-family: var(--font-sans);
     min-height: 100vh;
   }
 
+  /* Dados "crus" -- precos, percentagens, tokens, timestamps -- ficam a
+     monoespacada; tudo o resto (titulos, listas, menus) usa a sans-serif
+     para criar contraste claro entre dado e prosa/navegacao. */
+
+  a, button, input { font-family: inherit; }
+
+  :focus-visible {
+    outline: 2px solid var(--stamp-red);
+    outline-offset: 2px;
+  }
+
   header {
-    padding: 48px 40px 24px;
+    padding: 40px 40px 22px;
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     flex-wrap: wrap;
     gap: 16px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .pulse-dot {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: var(--brand);
-    box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.6);
-    animation: pulse 2.2s infinite;
-  }
-
-  @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(94, 234, 212, 0.55); }
-    70%  { box-shadow: 0 0 0 10px rgba(94, 234, 212, 0); }
-    100% { box-shadow: 0 0 0 0 rgba(94, 234, 212, 0); }
+    border-bottom: 1px solid var(--desk-line);
   }
 
   h1 {
-    font-size: 22px;
-    font-weight: 600;
+    font-family: var(--font-display);
+    font-size: 24px;
+    font-weight: 400;
     margin: 0;
-    letter-spacing: -0.01em;
+    letter-spacing: 0.01em;
   }
 
   .subtitle {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--desk-ink-muted);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
+    margin-top: 6px;
   }
 
   .meta {
     font-family: var(--font-mono);
     font-size: 12px;
-    color: var(--text-muted);
+    color: var(--desk-ink-muted);
     text-align: right;
   }
 
   main {
-    padding: 32px 40px 80px;
+    padding: 32px 40px 90px;
     max-width: 1200px;
     margin: 0 auto;
   }
 
+  /* Flex em vez de grid auto-fill: uma ultima linha incompleta (ex: 4º
+     cartao sozinho) fica centrada no seu tamanho natural em vez de esticar
+     para preencher a linha toda. */
   .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 26px;
   }
 
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 24px;
-    position: relative;
-    overflow: hidden;
-    opacity: 0;
-    transform: translateY(14px);
-    animation: rise 0.5s ease forwards;
-    transition: border-color 0.25s ease, transform 0.25s ease, background 0.25s ease;
+  /* --- Painel de seleccao (fica na secretaria, nao no papel) --- */
+  .control-panel {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 16px 0 26px;
+    margin-bottom: 8px;
+    border-bottom: 1px dashed var(--desk-line);
   }
+
+  .control-label {
+    font-size: 11px;
+    color: var(--desk-ink-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+  }
+
+  .asset-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 16px;
+    border-radius: 999px;
+    border: 1px solid var(--desk-line);
+    background: transparent;
+    cursor: pointer;
+    user-select: none;
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    color: var(--desk-ink);
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  }
+
+  .asset-chip .ticker { font-family: var(--font-mono); color: var(--desk-ink-muted); font-size: 11px; }
+
+  .asset-chip:hover:not(:disabled) { border-color: var(--paper-edge); }
+
+  .asset-chip.checked {
+    border-color: var(--desk-ink);
+    background: var(--desk-ink);
+    color: var(--desk);
+  }
+
+  .asset-chip.checked .ticker { color: var(--desk); opacity: 0.6; }
+
+  .asset-chip:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .stamp-btn {
+    margin-left: auto;
+    background: transparent;
+    color: var(--desk-ink);
+    border: 1px solid var(--desk-ink);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 10px 20px;
+    cursor: pointer;
+    transition: transform 0.1s ease, background 0.15s ease, color 0.15s ease;
+  }
+
+  .stamp-btn:hover:not(:disabled) {
+    background: var(--desk-ink);
+    color: var(--desk);
+  }
+
+  .stamp-btn:active:not(:disabled) { transform: scale(0.96); }
+
+  .stamp-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* --- Cada processo: uma folha de papel sobre a secretaria --- */
+  .card {
+    flex: 1 1 320px;
+    max-width: 380px;
+    background: var(--paper);
+    color: var(--ink);
+    border: 1px solid rgba(0,0,0,0.15);
+    padding: 22px 22px 20px;
+    position: relative;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+    opacity: 0;
+    transform: translateY(10px) rotate(var(--tilt, 0deg));
+    animation: settle 0.4s ease forwards;
+  }
+
+  .card:nth-child(odd)  { --tilt: -0.6deg; }
+  .card:nth-child(even) { --tilt: 0.5deg; }
 
   .card:hover {
-    border-color: var(--brand);
-    transform: translateY(-2px);
-    background: var(--surface-hover);
+    transform: translateY(-3px) rotate(var(--tilt, 0deg));
+    box-shadow: 0 12px 24px rgba(0,0,0,0.4);
   }
 
-  @keyframes rise {
-    to { opacity: 1; transform: translateY(0); }
+  .card, .card:hover { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+
+  @keyframes settle {
+    to { opacity: 1; transform: translateY(0) rotate(var(--tilt, 0deg)); }
   }
 
   .card-top {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    margin-bottom: 18px;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .case-no {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    color: var(--ink-faded);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
   }
 
   .asset-name {
-    font-size: 19px;
+    font-family: var(--font-sans);
     font-weight: 600;
-  }
-
-  .ticker {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-muted);
-    letter-spacing: 0.05em;
+    font-size: 20px;
+    margin-top: 3px;
   }
 
   .trend-tag {
-    font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 10.5px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    padding: 4px 10px;
-    border-radius: 999px;
+    padding: 4px 8px;
+    border: 1px solid currentColor;
     white-space: nowrap;
+    flex-shrink: 0;
   }
 
-  .trend-alta   { color: var(--positive); background: rgba(52, 211, 153, 0.1); border: 1px solid rgba(52, 211, 153, 0.3); }
-  .trend-baixa  { color: var(--negative); background: rgba(248, 113, 113, 0.1); border: 1px solid rgba(248, 113, 113, 0.3); }
-  .trend-lateral, .trend-null { color: var(--mixed); background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); }
+  .trend-alta   { color: var(--stamp-green); }
+  .trend-baixa  { color: var(--stamp-red); }
+  .trend-lateral, .trend-null { color: var(--ink-faded); }
+
+  .rule {
+    height: 1px;
+    background: var(--paper-edge);
+    margin: 16px 0;
+  }
+
+  .eyebrow {
+    font-size: 10px;
+    color: var(--ink-faded);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 9px;
+  }
 
   .price-row {
     display: flex;
     align-items: baseline;
-    gap: 10px;
-    margin-bottom: 4px;
+    gap: 12px;
   }
 
   .price {
     font-family: var(--font-mono);
-    font-size: 30px;
+    font-size: 26px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
   }
 
-  .variation {
-    font-family: var(--font-mono);
-    font-size: 14px;
-    font-weight: 600;
-  }
+  .variation { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+  .variation.positive { color: var(--stamp-green); }
+  .variation.negative { color: var(--stamp-red); }
 
-  .variation.positive { color: var(--positive); }
-  .variation.negative { color: var(--negative); }
-
-  .divider {
-    height: 1px;
-    background: var(--border);
-    margin: 18px 0;
-  }
-
-  .sentiment-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 12px;
-  }
-
-  .sentiment-label {
-    font-size: 12px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-family: var(--font-mono);
-  }
-
+  /* Badge de sentimento -- pilula, nao texto entre aspas. */
   .sentiment-value {
+    display: inline-block;
+    font-family: var(--font-sans);
     font-weight: 600;
-    font-size: 13px;
-    text-transform: capitalize;
-  }
-
-  .sentiment-value.positivo { color: var(--positive); }
-  .sentiment-value.negativo { color: var(--negative); }
-  .sentiment-value.misto, .sentiment-value.neutro { color: var(--mixed); }
-
-  .gauge {
-    height: 6px;
-    border-radius: 999px;
-    background: var(--border);
-    overflow: hidden;
-    margin-bottom: 16px;
-  }
-
-  .gauge-fill {
-    height: 100%;
-    width: 0%;
-    border-radius: 999px;
-    transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .headlines {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .headlines li {
-    font-size: 12.5px;
-    color: var(--text-muted);
-    line-height: 1.5;
-    padding-left: 14px;
-    position: relative;
-  }
-
-  .headlines li::before {
-    content: "›";
-    position: absolute;
-    left: 0;
-    color: var(--brand);
-  }
-
-  .validation-note {
-    margin-top: 16px;
-    padding: 10px 12px;
-    background: rgba(251, 191, 36, 0.08);
-    border: 1px solid rgba(251, 191, 36, 0.25);
-    border-radius: 6px;
     font-size: 12px;
-    color: var(--mixed);
-  }
-
-  .empty-state {
-    text-align: center;
-    padding: 100px 20px;
-    color: var(--text-muted);
-  }
-
-  .empty-state .glyph {
-    font-family: var(--font-mono);
-    font-size: 40px;
-    color: var(--border);
-    margin-bottom: 16px;
-  }
-
-  .empty-state p {
-    font-family: var(--font-mono);
-    font-size: 13px;
-    max-width: 420px;
-    margin: 0 auto;
-    line-height: 1.6;
-  }
-
-  .unavailable-badge {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--negative);
-    background: rgba(248, 113, 113, 0.1);
-    border: 1px solid rgba(248, 113, 113, 0.3);
-    padding: 3px 8px;
-    border-radius: 6px;
-  }
-
-  /* --- Painel de seleccao --- */
-  .control-panel {
-    display: flex;
-    align-items: center;
-    gap: 20px;
-    flex-wrap: wrap;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 18px 22px;
-    margin-bottom: 28px;
-  }
-
-  .asset-toggle {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 16px;
+    text-transform: capitalize;
+    padding: 4px 12px;
     border-radius: 999px;
-    border: 1px solid var(--border);
-    cursor: pointer;
-    user-select: none;
-    transition: border-color 0.2s ease, background 0.2s ease;
-    font-size: 13px;
-  }
-
-  .asset-toggle input { accent-color: var(--brand); }
-
-  .asset-toggle.checked {
-    border-color: var(--brand);
-    background: rgba(94, 234, 212, 0.08);
-  }
-
-  .asset-toggle.disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
-
-  .analyze-btn {
-    margin-left: auto;
-    background: var(--brand);
-    color: #06231F;
-    border: none;
-    font-family: var(--font-display);
-    font-weight: 600;
-    font-size: 13.5px;
-    padding: 10px 22px;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-  }
-
-  .analyze-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(94, 234, 212, 0.25);
-  }
-
-  .analyze-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  /* --- Estados de card: loading / erro --- */
-  .card.loading, .card.error-card {
-    animation: rise 0.4s ease forwards;
-  }
-
-  .skeleton-row {
-    height: 14px;
-    border-radius: 5px;
-    background: linear-gradient(90deg, var(--border) 25%, #2a3b4d 37%, var(--border) 63%);
-    background-size: 400% 100%;
-    animation: shimmer 1.6s ease infinite;
     margin-bottom: 10px;
   }
 
-  @keyframes shimmer {
-    0% { background-position: 100% 50%; }
-    100% { background-position: 0 50%; }
+  .sentiment-value.positivo {
+    background: #C9E8CE;
+    border: 1px solid rgba(53, 86, 58, 0.25);
+    color: #1F4027;
   }
 
-  .loading-label {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--brand);
+  .sentiment-value.negativo {
+    background: #F3D0C8;
+    border: 1px solid rgba(161, 48, 31, 0.25);
+    color: #7A2016;
+  }
+
+  .sentiment-value.misto, .sentiment-value.neutro {
+    background: rgba(138, 124, 92, 0.15);
+    border: 1px solid rgba(138, 124, 92, 0.3);
+    color: var(--ink-faded);
+  }
+
+  .headlines {
+    margin: 0;
+    padding-left: 20px;
     display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 14px;
+    flex-direction: column;
   }
 
-  .spinner {
-    width: 12px;
+  .headlines li {
+    font-size: 12px;
+    color: var(--ink-faded);
+    line-height: 1.6;
+    margin-bottom: 10px;
+  }
+
+  .headlines li:last-child { margin-bottom: 0; }
+
+  .unavailable-badge {
+    display: inline-block;
+    font-size: 10.5px;
+    color: var(--stamp-red);
+    border: 1px solid var(--stamp-red);
+    padding: 2px 7px;
+    margin-top: 8px;
+  }
+
+  /* --- O carimbo de veredito: a assinatura da pagina --- */
+  .verdict-wrap {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 18px;
+  }
+
+  .stamp {
+    font-family: var(--font-display);
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    padding: 7px 14px;
+    border: 2px solid currentColor;
+    border-radius: 2px;
+    text-shadow: 0.5px 0.5px 0 currentColor;
+    opacity: 0.85;
+    transform: rotate(var(--r, -2deg));
+    animation: stamp-down 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+  }
+
+  .stamp-green { color: var(--stamp-green); }
+  .stamp-red   { color: var(--stamp-red); }
+
+  @keyframes stamp-down {
+    0%   { opacity: 0; transform: scale(1.9) rotate(var(--r, -2deg)); }
+    60%  { opacity: 0.92; transform: scale(0.94) rotate(var(--r, -2deg)); }
+    100% { opacity: 0.85; transform: scale(1) rotate(var(--r, -2deg)); }
+  }
+
+  .validation-note {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--paper-edge);
+    font-size: 11.5px;
+    color: var(--stamp-red);
+    line-height: 1.5;
+  }
+
+  .validation-note .eyebrow { color: var(--stamp-red); opacity: 0.8; }
+
+  /* --- Estado vazio --- */
+  .empty-state {
+    text-align: center;
+    padding: 90px 20px;
+    color: var(--desk-ink-muted);
+    border: 1px dashed var(--desk-line);
+  }
+
+  .empty-state .glyph {
+    font-family: var(--font-display);
+    font-size: 15px;
+    color: var(--desk-ink-muted);
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+
+  .empty-state p {
+    font-size: 13px;
+    max-width: 420px;
+    margin: 0 auto;
+    line-height: 1.7;
+  }
+
+  /* --- Card em curso / erro: continuam folhas, ainda sem carimbo --- */
+  .card.loading .asset-name { color: var(--ink-faded); }
+
+  .case-log {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    font-size: 12px;
+  }
+
+  .case-log .row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--ink-faded);
+  }
+
+  .case-log .row.done { color: var(--ink); }
+  .case-log .row.active { color: var(--ink); }
+
+  .case-log .mark { flex-shrink: 0; width: 16px; text-align: center; }
+  .case-log .row.done .mark { color: var(--stamp-green); }
+
+  .cursor {
+    display: inline-block;
+    width: 7px;
     height: 12px;
-    border-radius: 50%;
-    border: 2px solid rgba(94, 234, 212, 0.25);
-    border-top-color: var(--brand);
-    animation: spin 0.8s linear infinite;
+    background: var(--ink);
+    margin-left: 2px;
+    animation: blink 1s step-end infinite;
+    vertical-align: -2px;
   }
 
-  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes blink { 50% { opacity: 0; } }
 
-  .error-card {
-    border-color: rgba(248, 113, 113, 0.4);
-  }
+  .error-card .asset-name { color: var(--stamp-red); }
 
   .error-message {
-    font-family: var(--font-mono);
     font-size: 12px;
-    color: var(--negative);
+    color: var(--ink);
     line-height: 1.6;
-    margin-top: 12px;
   }
 
-  /* --- Pipeline de progresso (dentro do loading card) --- */
-  .pipeline {
+  /* --- Registo (metricas) --- */
+  .ledger {
     display: flex;
-    align-items: center;
-    margin-bottom: 4px;
-  }
-
-  .step {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-
-  .step-dot {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--border);
-    transition: background 0.4s ease, box-shadow 0.4s ease;
-  }
-
-  .step-label {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    white-space: nowrap;
-  }
-
-  .step-line {
-    flex: 1;
-    height: 2px;
-    background: var(--border);
-    margin: 0 6px 20px;
-    transition: background 0.4s ease;
-  }
-
-  .step-line.done { background: var(--brand); }
-
-  .step.done .step-dot {
-    background: var(--brand);
-  }
-
-  .step.done .step-label { color: var(--text); }
-
-  .step.active .step-dot {
-    background: var(--brand);
-    box-shadow: 0 0 0 4px rgba(94, 234, 212, 0.18);
-    animation: dot-pulse 1.4s ease infinite;
-  }
-
-  .step.active .step-label { color: var(--brand); }
-
-  @keyframes dot-pulse {
-    0%, 100% { box-shadow: 0 0 0 4px rgba(94, 234, 212, 0.18); }
-    50% { box-shadow: 0 0 0 8px rgba(94, 234, 212, 0.05); }
-  }
-
-  /* --- Barra de metricas (observabilidade) --- */
-  .metrics-bar {
-    display: flex;
-    gap: 28px;
+    gap: 30px;
     flex-wrap: wrap;
-    padding: 14px 40px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(18, 24, 33, 0.5);
+    padding: 12px 40px;
+    border-bottom: 1px solid var(--desk-line);
+    font-size: 11px;
   }
 
-  .metric-item {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
+  .ledger-item { display: flex; flex-direction: column; gap: 2px; }
 
-  .metric-value {
+  .ledger-value {
     font-family: var(--font-mono);
     font-size: 16px;
     font-weight: 600;
+    color: var(--desk-ink);
+    font-variant-numeric: tabular-nums;
   }
 
-  .metric-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-muted);
+  .ledger-label {
+    color: var(--desk-ink-muted);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.07em;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+  }
+
+  @media (max-width: 640px) {
+    header, main, .ledger { padding-left: 20px; padding-right: 20px; }
+    .stamp-btn { margin-left: 0; width: 100%; }
   }
 </style>
 </head>
@@ -727,45 +702,32 @@ DASHBOARD_HTML = r"""
 
 <header>
   <div>
-    <div class="brand">
-      <span class="pulse-dot"></span>
-      <h1>Financial Crew</h1>
-    </div>
-    <div class="subtitle">Análise multi-agente · dados em tempo real</div>
+    <h1>Financial Crew</h1>
+    <div class="subtitle">Dossiê de análise · três agentes, um veredito</div>
   </div>
   <div class="meta" id="last-updated">a carregar…</div>
 </header>
 
-<div class="metrics-bar" id="metrics-bar"></div>
+<div class="ledger" id="ledger"></div>
 
 <main>
   <div class="control-panel" id="control-panel">
-    <span class="sentiment-label" style="text-transform:none;">A carregar ativos…</span>
+    <span class="control-label">a carregar ativos…</span>
   </div>
   <div class="grid" id="grid"></div>
 </main>
 
 <script>
-const POSITIVE_COLOR = "#34D399";
-const NEGATIVE_COLOR = "#F87171";
-const MIXED_COLOR = "#FBBF24";
-
 let AVAILABLE_ASSETS = [];
 let selectedTickers = new Set();
 let pollHandle = null;
 const MAX_SELECTION = 2;
 
-function sentimentColor(sentiment) {
-  if (sentiment === "positivo") return POSITIVE_COLOR;
-  if (sentiment === "negativo") return NEGATIVE_COLOR;
-  return MIXED_COLOR;
-}
-
-function sentimentGaugeWidth(sentiment) {
-  if (sentiment === "positivo") return 85;
-  if (sentiment === "negativo") return 15;
-  if (sentiment === "misto") return 50;
-  return 40;
+function trendLabel(trend) {
+  if (trend === "alta") return "ALTA ▲";
+  if (trend === "baixa") return "BAIXA ▼";
+  if (trend === "lateral") return "LATERAL ▬";
+  return "S/ DADOS";
 }
 
 function formatPrice(value, currency) {
@@ -779,6 +741,17 @@ function formatVariation(value) {
   return `${sign}${value.toFixed(2)}%`;
 }
 
+// Angulo do carimbo derivado do id do ativo (nao aleatorio a cada render --
+// o mesmo cartao fica sempre com o mesmo angulo). Intervalo pequeno,
+// -3deg a 3deg, para parecer autentico sem ser descuidado.
+function stampAngle(seed) {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return (Math.abs(hash) % 7) - 3;
+}
+
 function renderReportCard(report, index) {
   const tech = report.dados_tecnicos || {};
   const news = report.analise_noticias || {};
@@ -787,93 +760,73 @@ function renderReportCard(report, index) {
   const variationClass = variation > 0 ? "positive" : (variation < 0 ? "negative" : "");
   const sentiment = news.sentimento_geral || "neutro";
   const headlines = (news.titulos_usados || []).slice(0, 4);
+  const flagged = Boolean(report.notas_de_validacao);
+  const rot = stampAngle(report.ticker);
 
   const card = document.createElement("div");
   card.className = "card";
-  card.style.animationDelay = `${index * 70}ms`;
+  card.style.animationDelay = `${index * 60}ms`;
 
   card.innerHTML = `
     <div class="card-top">
       <div>
+        <div class="case-no">Nº ${report.ticker}</div>
         <div class="asset-name">${report.ativo}</div>
-        <div class="ticker">${report.ticker}</div>
       </div>
-      <div class="trend-tag trend-${trend}">${trend === "null" ? "s/ dados" : trend}</div>
+      <div class="trend-tag trend-${trend}">${trendLabel(trend)}</div>
     </div>
 
+    <div class="eyebrow">Testemunho — analista técnico</div>
     <div class="price-row">
       <div class="price">${formatPrice(tech.preco_atual, tech.moeda)}</div>
       <div class="variation ${variationClass}">${formatVariation(variation)}</div>
     </div>
-    ${tech.dados_indisponiveis ? '<span class="unavailable-badge">dados técnicos indisponíveis</span>' : ""}
+    ${tech.dados_indisponiveis ? '<span class="unavailable-badge">dados indisponíveis</span>' : ""}
 
-    <div class="divider"></div>
+    <div class="rule"></div>
 
-    <div class="sentiment-row">
-      <span class="sentiment-label">Sentimento de mercado</span>
-      <span class="sentiment-value ${sentiment}">${sentiment}</span>
-    </div>
-    <div class="gauge">
-      <div class="gauge-fill" style="background:${sentimentColor(sentiment)}"></div>
-    </div>
-
-    <ul class="headlines">
+    <div class="eyebrow">Testemunho — analista de notícias</div>
+    <div class="sentiment-value ${sentiment}">${sentiment}</div>
+    <ol class="headlines">
       ${headlines.map(h => `<li>${h}</li>`).join("")}
-    </ul>
+    </ol>
 
-    ${report.notas_de_validacao ? `<div class="validation-note">⚠ ${report.notas_de_validacao}</div>` : ""}
+    <div class="verdict-wrap">
+      <div class="stamp ${flagged ? "stamp-red" : "stamp-green"}" style="--r:${rot}deg">
+        ${flagged ? "Sinalizado" : "Validado"}
+      </div>
+    </div>
+    ${flagged ? `
+      <div class="validation-note">
+        <div class="eyebrow">Nota do orquestrador</div>
+        ${report.notas_de_validacao}
+      </div>` : ""}
   `;
-
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      const fill = card.querySelector(".gauge-fill");
-      if (fill) fill.style.width = sentimentGaugeWidth(sentiment) + "%";
-    }, 150 + index * 70);
-  });
 
   return card;
 }
 
 const PIPELINE_STAGES = [
-  { key: "noticias", label: "Notícias", detail: "Analista de Notícias a pesquisar manchetes recentes…" },
-  { key: "tecnico", label: "Técnico", detail: "Analista Técnico a consultar preço e histórico…" },
-  { key: "orquestrador", label: "Orquestrador", detail: "Orquestrador a cruzar e validar os dados…" },
+  { key: "noticias", label: "Notícias recebidas" },
+  { key: "tecnico", label: "Dados técnicos" },
+  { key: "orquestrador", label: "Validação final" },
 ];
 
 function pipelineHTML(stage) {
-  if (!stage) {
-    const steps = PIPELINE_STAGES.map((s, i) => `
-      <div class="step pending">
-        <span class="step-dot"></span>
-        <span class="step-label">${s.label}</span>
-      </div>
-      ${i < PIPELINE_STAGES.length - 1 ? '<span class="step-line"></span>' : ""}
-    `).join("");
-    return `
-      <div class="pipeline">${steps}</div>
-      <div class="loading-label"><span class="spinner"></span>Em fila de espera…</div>
-    `;
-  }
-
-  const currentIndex = PIPELINE_STAGES.findIndex(s => s.key === stage);
+  const currentIndex = stage ? PIPELINE_STAGES.findIndex(s => s.key === stage) : -1;
   const effectiveIndex = stage === "concluido" ? PIPELINE_STAGES.length : currentIndex;
-  const activeStage = PIPELINE_STAGES[effectiveIndex] || PIPELINE_STAGES[PIPELINE_STAGES.length - 1];
 
-  const steps = PIPELINE_STAGES.map((s, i) => {
+  const rows = PIPELINE_STAGES.map((s, i) => {
     const state = i < effectiveIndex ? "done" : (i === effectiveIndex ? "active" : "pending");
+    const mark = state === "done" ? "✓" : (state === "active" ? "…" : "·");
     return `
-      <div class="step ${state}">
-        <span class="step-dot"></span>
-        <span class="step-label">${s.label}</span>
-      </div>
-      ${i < PIPELINE_STAGES.length - 1 ? `<span class="step-line ${i < effectiveIndex ? "done" : ""}"></span>` : ""}
-    `;
+      <div class="row ${state}">
+        <span>${i + 1}. ${s.label}${state === "active" ? '<span class="cursor"></span>' : ""}</span>
+        <span class="mark">${mark}</span>
+      </div>`;
   }).join("");
 
-  return `
-    <div class="pipeline">${steps}</div>
-    <div class="loading-label"><span class="spinner"></span>${activeStage.detail}</div>
-  `;
+  return `<div class="case-log">${rows}</div>`;
 }
 
 function updatePipelineStage(cardNode, stage) {
@@ -884,17 +837,16 @@ function updatePipelineStage(cardNode, stage) {
 function renderLoadingCard(assetName, ticker, index, stage) {
   const card = document.createElement("div");
   card.className = "card loading";
-  card.style.animationDelay = `${index * 70}ms`;
+  card.style.animationDelay = `${index * 60}ms`;
   card.innerHTML = `
     <div class="card-top">
       <div>
+        <div class="case-no">Nº ${ticker}</div>
         <div class="asset-name">${assetName}</div>
-        <div class="ticker">${ticker}</div>
       </div>
     </div>
-    <div class="skeleton-row" style="width: 55%; height: 26px;"></div>
-    <div class="skeleton-row" style="width: 88%;"></div>
-    <div class="divider"></div>
+    <div class="rule"></div>
+    <div class="eyebrow">Registo do processo</div>
     <div class="pipeline-wrap">${pipelineHTML(stage)}</div>
   `;
   return card;
@@ -903,15 +855,17 @@ function renderLoadingCard(assetName, ticker, index, stage) {
 function renderErrorCard(assetName, ticker, index, detail) {
   const card = document.createElement("div");
   card.className = "card error-card";
-  card.style.animationDelay = `${index * 70}ms`;
+  card.style.animationDelay = `${index * 60}ms`;
   card.innerHTML = `
     <div class="card-top">
       <div>
+        <div class="case-no">Nº ${ticker}</div>
         <div class="asset-name">${assetName}</div>
-        <div class="ticker">${ticker}</div>
       </div>
-      <div class="trend-tag trend-baixa">falhou</div>
+      <div class="trend-tag trend-baixa">Rejeitado</div>
     </div>
+    <div class="rule"></div>
+    <div class="eyebrow">Notas do processo</div>
     <div class="error-message">${detail || "Ocorreu um erro desconhecido."}</div>
   `;
   return card;
@@ -922,23 +876,19 @@ function renderControlPanel() {
   const limitReached = selectedTickers.size >= MAX_SELECTION;
 
   panel.innerHTML = `
-    <span class="sentiment-label" style="text-transform:none; white-space:nowrap;">
-      Escolhe até ${MAX_SELECTION} ativos:
-    </span>
+    <span class="control-label">Escolhe até ${MAX_SELECTION} ativos para abrir processo:</span>
   ` + AVAILABLE_ASSETS.map(a => {
     const checked = selectedTickers.has(a.ticker);
     const disabled = !checked && limitReached;
     return `
-      <label class="asset-toggle ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}" data-ticker="${a.ticker}">
-        <input type="checkbox" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""} />
+      <button type="button" class="asset-chip ${checked ? "checked" : ""}" data-ticker="${a.ticker}" aria-pressed="${checked}" ${disabled ? "disabled" : ""}>
         ${a.asset_name} <span class="ticker">${a.ticker}</span>
-      </label>
+      </button>
     `;
-  }).join("") + `<button class="analyze-btn" id="analyze-btn">Analisar selecionados</button>`;
+  }).join("") + `<button class="stamp-btn" id="analyze-btn">Abrir processo</button>`;
 
-  panel.querySelectorAll(".asset-toggle:not(.disabled)").forEach(el => {
-    el.addEventListener("click", (e) => {
-      e.preventDefault();
+  panel.querySelectorAll(".asset-chip:not(:disabled)").forEach(el => {
+    el.addEventListener("click", () => {
       const ticker = el.dataset.ticker;
       if (selectedTickers.has(ticker)) {
         selectedTickers.delete(ticker);
@@ -956,7 +906,7 @@ async function triggerAnalysis() {
   if (!selectedTickers.size) return;
   const btn = document.getElementById("analyze-btn");
   btn.disabled = true;
-  btn.textContent = "A analisar…";
+  btn.textContent = "A investigar…";
 
   await fetch("/api/analyze", {
     method: "POST",
@@ -983,9 +933,9 @@ function renderGrid(jobs) {
   if (!tickers.length) {
     if (grid.dataset.empty !== "1") {
       grid.innerHTML = `
-        <div class="empty-state" style="grid-column: 1 / -1;">
-          <div class="glyph">{ }</div>
-          <p>Seleciona um ou mais ativos acima e clica em "Analisar selecionados" para começar.</p>
+        <div class="empty-state" style="flex-basis: 100%;">
+          <div class="glyph">Nenhum processo aberto</div>
+          <p>Seleciona um ou mais ativos acima e carrega em "Abrir processo" para começar.</p>
         </div>`;
       grid.dataset.empty = "1";
       cardElements = {};
@@ -1005,8 +955,8 @@ function renderGrid(jobs) {
     const existing = cardElements[ticker];
 
     // Se ja esta a mostrar "running" e so a fase mudou, atualiza o
-    // pipeline no lugar -- sem recriar o cartao, sem reiniciar animacoes,
-    // sem flicker. So a barra de progresso do pipeline muda.
+    // registo do processo no lugar -- sem recriar o cartao, sem reiniciar
+    // animacoes, sem flicker.
     if (job.status === "running" && existing && (cardSignatures[ticker] || "").startsWith("running:")) {
       if (cardSignatures[ticker] !== sig) {
         updatePipelineStage(existing, job.stage);
@@ -1055,7 +1005,7 @@ async function fetchStatus() {
     const btn = document.getElementById("analyze-btn");
     if (!stillWorking && btn) {
       btn.disabled = false;
-      btn.textContent = "Analisar selecionados";
+      btn.textContent = "Abrir processo";
       stopPolling();
       loadMetrics();
     }
@@ -1076,22 +1026,22 @@ function stopPolling() {
 }
 
 async function loadMetrics() {
-  const bar = document.getElementById("metrics-bar");
+  const bar = document.getElementById("ledger");
   try {
     const res = await fetch("/api/metrics");
     const m = await res.json();
 
     if (!m.total_runs) {
-      bar.innerHTML = `<span class="metric-label">Ainda sem execuções registadas -- corre uma análise para veres métricas aqui.</span>`;
+      bar.innerHTML = `<span class="ledger-label">Registo vazio -- corre uma análise para veres métricas aqui.</span>`;
       return;
     }
 
     const successPct = m.success_rate !== null ? Math.round(m.success_rate * 100) : "—";
     bar.innerHTML = `
-      <div class="metric-item"><span class="metric-value">${m.total_runs}</span><span class="metric-label">Execuções</span></div>
-      <div class="metric-item"><span class="metric-value">${successPct}%</span><span class="metric-label">Taxa de sucesso</span></div>
-      <div class="metric-item"><span class="metric-value">${m.avg_duration_seconds ?? "—"}s</span><span class="metric-label">Duração média</span></div>
-      <div class="metric-item"><span class="metric-value">${(m.total_tokens || 0).toLocaleString("pt-PT")}</span><span class="metric-label">Tokens usados (total)</span></div>
+      <div class="ledger-item"><span class="ledger-value">${m.total_runs}</span><span class="ledger-label">Processos</span></div>
+      <div class="ledger-item"><span class="ledger-value">${successPct}%</span><span class="ledger-label">Taxa de sucesso</span></div>
+      <div class="ledger-item"><span class="ledger-value">${m.avg_duration_seconds ?? "—"}s</span><span class="ledger-label">Duração média</span></div>
+      <div class="ledger-item"><span class="ledger-value">${(m.total_tokens || 0).toLocaleString("pt-PT")}</span><span class="ledger-label">Tokens (total)</span></div>
     `;
   } catch (err) {
     bar.innerHTML = "";
