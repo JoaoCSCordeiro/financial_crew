@@ -153,7 +153,8 @@ adds no dependency to the main crew unless you opt in.
 ```bash
 # 1. train (separate deps, see finetuning/README.md)
 pip install -r finetuning/requirements.txt --extra-index-url https://download.pytorch.org/whl/cu126
-python -m finetuning.run_experiments
+python -m finetuning.run_experiments            # trains, registers in the MLflow Model Registry, promotes, exports
+python -m finetuning.drift --current twitter    # drift monitoring (Evidently), logged to MLflow
 python -m finetuning.compare --n-per-class 20   # measured comparison vs. the LLM path
 
 # 2. serve (own Dockerfile, own requirements.txt -- see finetuning/README.md)
@@ -200,7 +201,8 @@ only so modules that check for its presence at import time don't error out.
 - GitHub Actions — CI
 - Docker, Docker Compose
 - (optional, `finetuning/`) PyTorch, Hugging Face `transformers`/`peft`/`datasets`,
-  MLflow, FastAPI — LoRA fine-tuning, experiment tracking, and serving of an
+  MLflow (tracking + Model Registry), Evidently, FastAPI — LoRA fine-tuning,
+  experiment tracking, model versioning, drift monitoring, and serving of an
   alternative sentiment classifier; see `finetuning/README.md`
 
 ## Limitations

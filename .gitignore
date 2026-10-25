@@ -56,6 +56,8 @@ htmlcov/
 # `python -m finetuning.run_experiments`) e cache do Hugging Face Hub.
 finetuning/mlruns/
 finetuning/models/
+# Log de previsões do serving (PREDICTION_LOG_PATH, ver finetuning/drift.py)
+finetuning/prediction_log.jsonl
 huggingface_hub_cache/
 
 # Notas de decisões técnicas para preparação de entrevista -- não faz

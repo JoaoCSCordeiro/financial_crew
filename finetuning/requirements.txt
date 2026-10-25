@@ -16,8 +16,11 @@ peft>=0.20.0
 accelerate>=1.14.0
 datasets>=5.0.0
 
-# --- Tracking de experiências ---
+# --- Tracking de experiências + Model Registry ---
 mlflow>=3.15.0
+
+# --- Monitorização de drift (finetuning/drift.py) ---
+evidently>=0.7.23
 
 # --- Métricas de avaliação ---
 scikit-learn>=1.7.0

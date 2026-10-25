@@ -1,7 +1,8 @@
 """
 Corre 3 experiências de fine-tuning LoRA com hiperparâmetros diferentes,
-regista cada uma no MLflow (ver tracking.py) e seleciona a melhor por
-`eval_f1_macro`. O adapter da melhor corrida é copiado para
+regista cada uma no MLflow (ver tracking.py) e no Model Registry (ver
+registry.py), onde o gate de promoção decide se a nova versão passa a
+`champion`. No fim, o adapter do `champion` é exportado para
 `finetuning/models/best/`, de onde o serving (`finetuning/serving/app.py`)
 o carrega.
 
@@ -15,12 +16,12 @@ Uso:
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import asdict
 
 import mlflow
 
-from finetuning.tracking import BEST_MODEL_DIR, configure_tracking, select_best_run
+from finetuning.registry import evaluate_and_promote, export_champion, register_run
+from finetuning.tracking import configure_tracking, select_best_run
 from finetuning.train import TrainConfig, run_training
 
 EXPERIMENT_CONFIGS = [
@@ -61,7 +62,7 @@ def main() -> None:
 
     for config in EXPERIMENT_CONFIGS:
         print(f"\n=== A treinar {config.run_name} ===")
-        with mlflow.start_run(run_name=config.run_name):
+        with mlflow.start_run(run_name=config.run_name) as run:
             mlflow.log_params(asdict(config))
             result = run_training(config)
             mlflow.log_metrics(_flatten_metrics(result.metrics))
@@ -72,33 +73,20 @@ def main() -> None:
                 f"eval_accuracy={result.metrics.get('eval_accuracy'):.4f} "
                 f"train_runtime={result.train_runtime_seconds:.1f}s"
             )
+        version = register_run(run.info.run_id)
+        decision = evaluate_and_promote(version)
+        print(f"Registry: v{version.version} -> {decision.action} ({decision.reason})")
 
     best_run = select_best_run()
-    best_run_name = best_run.data.tags.get("mlflow.runName")
     print(
-        f"\n=== Melhor run: {best_run_name} (eval_f1_macro="
-        f"{best_run.data.metrics.get('eval_f1_macro'):.4f}) ==="
+        f"\n=== Melhor run da experiência: {best_run.data.tags.get('mlflow.runName')} "
+        f"(eval_f1_macro={best_run.data.metrics.get('eval_f1_macro'):.4f}) ==="
     )
-
-    best_adapter_source = None
-    for config in EXPERIMENT_CONFIGS:
-        if config.run_name == best_run_name:
-            from finetuning.train import MODELS_DIR
-
-            best_adapter_source = MODELS_DIR / config.run_name / "adapter"
-            break
-
-    if best_adapter_source is None or not best_adapter_source.exists():
-        raise RuntimeError(
-            f"Não encontrei o adapter local para o melhor run '{best_run_name}' "
-            f"em {best_adapter_source}. Os adapters ficam guardados localmente em "
-            "finetuning/models/<run_name>/adapter/ durante o treino."
-        )
-
-    if BEST_MODEL_DIR.exists():
-        shutil.rmtree(BEST_MODEL_DIR)
-    shutil.copytree(best_adapter_source, BEST_MODEL_DIR)
-    print(f"Adapter copiado para {BEST_MODEL_DIR} (usado pelo serving).")
+    provenance = export_champion()
+    print(
+        f"champion v{provenance['version']} ({provenance['run_name']}) exportado "
+        "para finetuning/models/best/ (usado pelo serving)."
+    )
 
 
 if __name__ == "__main__":
